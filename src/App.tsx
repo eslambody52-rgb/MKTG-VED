@@ -30,15 +30,15 @@ export default function App() {
 
   const stages = [
     { label: 'تجميعات', gid: '1535230545', icon: Layers },
-    { label: 'Junior 4', gid: '0', icon: GraduationCap },
-    { label: 'Junior 5', gid: '1', icon: GraduationCap },
-    { label: 'Junior 6', gid: '2', icon: GraduationCap },
-    { label: 'Middle 1', gid: '3', icon: GraduationCap },
-    { label: 'Middle 2', gid: '4', icon: GraduationCap },
-    { label: 'Middle 3', gid: '5', icon: GraduationCap },
-    { label: 'Senior 1', gid: '6', icon: GraduationCap },
-    { label: 'Senior 2', gid: '7', icon: GraduationCap },
-    { label: 'Senior 3', gid: '8', icon: GraduationCap },
+    { label: 'Junior 4', gid: '497207661', icon: GraduationCap },
+    { label: 'Junior 5', gid: '96752860', icon: GraduationCap },
+    { label: 'Junior 6', gid: '346788121', icon: GraduationCap },
+    { label: 'Middle 1', gid: '458352282', icon: GraduationCap },
+    { label: 'Middle 2', gid: '2113852114', icon: GraduationCap },
+    { label: 'Middle 3', gid: '2089699920', icon: GraduationCap },
+    { label: 'Senior 1', gid: '1640460225', icon: GraduationCap },
+    { label: 'Senior 2', gid: '595027661', icon: GraduationCap },
+    { label: 'Senior 3', gid: '286303232', icon: GraduationCap },
   ];
 
   const filteredData = useMemo(() => {

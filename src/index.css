@@ -1,65 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --background: #020617;
   --foreground: #f8fafc;
-  
   --card: rgba(30, 41, 59, 0.5);
-  --card-foreground: #f8fafc;
-  
-  --popover: #0f172a;
-  --popover-foreground: #f8fafc;
-  
   --primary: #6366f1;
-  --primary-foreground: #ffffff;
-  
-  --secondary: #1e293b;
-  --secondary-foreground: #f8fafc;
-  
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8;
-  
-  --accent: #1e293b;
-  --accent-foreground: #f8fafc;
-  
-  --destructive: #ef4444;
-  --destructive-foreground: #f8fafc;
-
   --border: rgba(255, 255, 255, 0.1);
-  --input: #1e293b;
-  --ring: #6366f1;
-  
-  --radius: 0.75rem;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --muted: #94a3b8;
 }
 
 body {
-  background-color: var(--background);
-  color: var(--foreground);
-  min-height: 100vh;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
+  @apply bg-background text-foreground min-h-screen overflow-x-hidden antialiased;
+  font-family: 'Inter', sans-serif;
 }
 
 .glass {
-  background: var(--card);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
+  @apply bg-card backdrop-blur-xl border border-border;
 }
 
-.glass-hover:hover {
-  background: rgba(51, 65, 85, 0.6);
-  border-color: rgba(255, 255, 255, 0.2);
-  transition: all 0.3s ease;
+.glass-hover {
+  @apply transition-all duration-300 hover:bg-slate-800/60 hover:border-white/20;
 }
 
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
+.arabic-text {
+  direction: rtl;
+  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 @keyframes fadeIn {
@@ -71,7 +38,17 @@ body {
   animation: fadeIn 0.5s ease forwards;
 }
 
-.arabic-text {
-  direction: rtl;
-  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }

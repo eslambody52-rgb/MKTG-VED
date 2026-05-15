@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   LayoutDashboard, 
   CheckSquare, 
@@ -13,8 +13,7 @@ import {
   ArrowRightLeft
 } from 'lucide-react';
 import { mockTasks, mockCollections } from './data/mockData';
-import { Status, Task } from './types';
-import { format } from 'date-fns';
+import type { Status, Task } from './types';
 import { useGoogleSheets } from './hooks/useGoogleSheets';
 
 const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
@@ -48,7 +47,7 @@ const Badge = ({ status }: { status: Status }) => {
 };
 
 export default function App() {
-  const { data: liveTasks, loading: loadingSheets } = useGoogleSheets();
+  const { data: liveTasks } = useGoogleSheets();
   const [activeTab, setActiveTab] = useState('tasks');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBranch, setFilterBranch] = useState('All');

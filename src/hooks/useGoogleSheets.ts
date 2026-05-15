@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Papa from 'papaparse';
-import { Task } from '../types';
+import type { Task } from '../types';
 
 // Replace this with your "Publish to web" CSV URL from Google Sheets
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXXXXXXXX/pub?output=csv';

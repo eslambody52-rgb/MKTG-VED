@@ -10,15 +10,21 @@ export const mapSheetRow = (row: any, gid: string) => {
       name: row[1] || 'بدون اسم', // Column B
       val: '',
       extra: '',
+      subject: '',
+      check1: false,
+      check2: false,
     };
   }
   
   // For all other tabs (Junior, Middle, Senior), map based on the standard structure
   return {
     id: row[2] || '', // Column C (Date/ID)
+    subject: row[3] || '', // Column D (Subject)
+    extra: row[4] || '', // Column E (Branch)
     name: row[6] || 'بدون اسم', // Column G (OP NAME)
     val: row[7] || '', // Column H (OP SHEET)
-    extra: row[4] || '', // Column E (Branch)
+    check1: row[8] === 'TRUE', // Column I (تجميعه)
+    check2: row[9] === 'TRUE', // Column J (اتسلمت)
   };
 };
 

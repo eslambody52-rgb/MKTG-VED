@@ -105,38 +105,77 @@ export default function App() {
           </div>
 
           {/* Table */}
-          <div className="glass rounded-2xl overflow-hidden border border-border">
+          <div className="glass rounded-2xl overflow-x-auto border border-border shadow-sm">
             {loading ? (
-              <div className="p-12 text-center text-muted-foreground">جاري تحميل البيانات من Google Sheets...</div>
+              <div className="p-12 text-center text-muted-foreground font-medium">جاري تحميل البيانات من Google Sheets...</div>
             ) : (
-              <table className="w-full text-right border-collapse">
+              <table className="w-full text-right border-collapse min-w-[800px]">
                 <thead>
                   <tr className="bg-secondary/50 border-b border-border">
-                    <th className="px-6 py-4 font-semibold text-sm">المعرف / التاريخ (C)</th>
-                    <th className="px-6 py-4 font-semibold text-sm">الاسم (G)</th>
-                    <th className="px-6 py-4 font-semibold text-sm">القيمة (H)</th>
-                    <th className="px-6 py-4 font-semibold text-sm">إضافي (E)</th>
+                    {activeGid === '1535230545' ? (
+                      <th className="px-6 py-4 font-semibold text-sm">الاسم (Name)</th>
+                    ) : (
+                      <>
+                        <th className="px-4 py-4 font-semibold text-sm w-16 text-center">تجميعه</th>
+                        <th className="px-4 py-4 font-semibold text-sm w-16 text-center">اتسلمت للـ V.E</th>
+                        <th className="px-4 py-4 font-semibold text-sm w-28 text-center">التاريخ</th>
+                        <th className="px-4 py-4 font-semibold text-sm w-32 text-center">المادة</th>
+                        <th className="px-4 py-4 font-semibold text-sm w-32 text-center">الفرع</th>
+                        <th className="px-6 py-4 font-semibold text-sm">اسم الدرس (OP NAME)</th>
+                        <th className="px-4 py-4 font-semibold text-sm w-36 text-center">OP SHEET</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredData.length > 0 ? filteredData.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-white/5 transition-colors group">
-                      <td className="px-6 py-4 text-sm text-muted-foreground">{item.id}</td>
-                      <td className="px-6 py-4 font-medium arabic-text">{item.name}</td>
-                      <td className="px-6 py-4">
-                        <span className="bg-primary/10 text-primary px-3 py-1 rounded-lg text-sm font-bold border border-primary/20">
-                          {item.val}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm arabic-text">{item.extra}</td>
+                <tbody className="divide-y divide-border bg-white/40 backdrop-blur-sm">
+                  {filteredData.length > 0 ? filteredData.map((item, idx) => {
+                    
+                    const getChipColor = (val: string) => {
+                      if (!val) return 'bg-gray-100 text-gray-600 border-gray-200';
+                      if (val.includes('اسكندريه') || val.includes('علوم')) return 'bg-blue-100 text-blue-800 border-blue-200';
+                      if (val.includes('القاهره') || val.includes('ماث') || val.includes('2025')) return 'bg-red-100 text-red-800 border-red-200';
+                      if (val.includes('رياضه')) return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+                      if (val.includes('ساينس')) return 'bg-green-100 text-green-800 border-green-200';
+                      if (val.includes('دراسات')) return 'bg-orange-100 text-orange-800 border-orange-200';
+                      return 'bg-gray-100 text-gray-700 border-gray-200';
+                    };
+
+                    const DropdownChip = ({ value }: { value: string }) => (
+                      <div className="relative inline-flex items-center w-full max-w-[120px] mx-auto">
+                        <select 
+                          className={`w-full appearance-none px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/50 text-center ${getChipColor(value)}`}
+                          defaultValue={value}
+                        >
+                          <option value={value}>{value}</option>
+                          <option value="تعديل...">تعديل...</option>
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-current opacity-70">
+                          <svg className="fill-current h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                        </div>
+                      </div>
+                    );
+
+                    return (
+                    <tr key={idx} className="hover:bg-white/50 transition-colors group">
+                      {activeGid === '1535230545' ? (
+                        <td className="px-6 py-4 font-medium arabic-text">{item.name}</td>
+                      ) : (
+                        <>
+                          <td className="px-4 py-4 text-center">
+                            <input type="checkbox" defaultChecked={item.check1} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer" />
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <input type="checkbox" defaultChecked={item.check2} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer" />
+                          </td>
+                          <td className="px-4 py-4 text-sm text-center text-muted-foreground font-medium">{item.id}</td>
+                          <td className="px-4 py-4 text-center"><DropdownChip value={item.subject} /></td>
+                          <td className="px-4 py-4 text-center"><DropdownChip value={item.extra} /></td>
+                          <td className="px-6 py-4 text-sm font-semibold arabic-text leading-relaxed max-w-md">{item.name}</td>
+                          <td className="px-4 py-4 text-center"><DropdownChip value={item.val} /></td>
+                        </>
+                      )}
                     </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground">
-                        لا توجد بيانات متاحة في هذا القسم حالياً.
-                      </td>
-                    </tr>
-                  )}
+                  )})}
                 </tbody>
               </table>
             )}

@@ -3,11 +3,18 @@ import Papa from 'papaparse';
 
 // Mapping based on your Google Apps Script and sheet structure
 export const mapSheetRow = (row: any, gid: string) => {
-  // If it's the Tagme3at tab (GID: 1535230545), the name is in Column B (index 1)
+  // If it's the Tagme3at tab (GID: 1535230545), the structure is for Tasks
   if (gid === '1535230545') {
     return {
       id: '',
       name: row[1] || 'بدون اسم', // Column B
+      opSheet: row[2] || '', // Column C
+      branch: row[3] || '', // Column D
+      notesMarketing: row[4] || '', // Column E
+      editor: row[5] || '', // Column F
+      done: row[6] === 'TRUE', // Column G
+      notesEditors: row[7] || '', // Column H
+      priority: row[8] === 'TRUE', // Column I
       val: '',
       extra: '',
       subject: '',

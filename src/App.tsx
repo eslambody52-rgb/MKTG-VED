@@ -22,6 +22,53 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
   </button>
 );
 
+const TaskRow = ({ item, DropdownChip }: any) => {
+  const [done, setDone] = useState(item.done);
+  const [cancel, setCancel] = useState(false);
+  const [priority, setPriority] = useState(item.priority);
+
+  const rowBg = cancel 
+    ? 'bg-red-500/10 hover:bg-red-500/20' 
+    : done 
+      ? 'bg-green-500/10 hover:bg-green-500/20' 
+      : 'hover:bg-white/50';
+
+  return (
+    <tr className={`transition-colors group border-b border-border/50 last:border-0 ${rowBg}`}>
+      <td className="px-4 py-4 text-sm font-semibold arabic-text leading-relaxed max-w-sm">{item.name}</td>
+      <td className="px-3 py-4 text-center"><DropdownChip value={item.opSheet} /></td>
+      <td className="px-3 py-4 text-center"><DropdownChip value={item.branch} /></td>
+      <td className="px-3 py-4 text-xs arabic-text">{item.notesMarketing}</td>
+      <td className="px-3 py-4 text-center"><DropdownChip value={item.editor} isEditor={true} /></td>
+      <td className="px-3 py-4 text-center">
+        <input 
+          type="checkbox" 
+          checked={done} 
+          onChange={(e) => { setDone(e.target.checked); if(e.target.checked) setCancel(false); }} 
+          className="w-5 h-5 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer" 
+        />
+      </td>
+      <td className="px-3 py-4 text-center">
+        <input 
+          type="checkbox" 
+          checked={cancel} 
+          onChange={(e) => { setCancel(e.target.checked); if(e.target.checked) setDone(false); }} 
+          className="w-5 h-5 rounded border-gray-300 text-red-600 focus:ring-red-600 cursor-pointer" 
+        />
+      </td>
+      <td className="px-3 py-4 text-xs arabic-text">{item.notesEditors}</td>
+      <td className="px-3 py-4 text-center">
+        <input 
+          type="checkbox" 
+          checked={priority} 
+          onChange={(e) => setPriority(e.target.checked)} 
+          className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-600 cursor-pointer accent-purple-600" 
+        />
+      </td>
+    </tr>
+  );
+};
+
 export default function App() {
   const [activeGid, setActiveGid] = useState('1535230545'); // Default to Tagme3at
   const [activeLabel, setActiveLabel] = useState('تجميعات');
@@ -113,7 +160,17 @@ export default function App() {
                 <thead>
                   <tr className="bg-secondary/50 border-b border-border">
                     {activeGid === '1535230545' ? (
-                      <th className="px-6 py-4 font-semibold text-sm">الاسم (Name)</th>
+                      <>
+                        <th className="px-4 py-4 font-semibold text-sm">NAME</th>
+                        <th className="px-3 py-4 font-semibold text-sm w-28 text-center">OP SHEET</th>
+                        <th className="px-3 py-4 font-semibold text-sm w-28 text-center">BRANCH</th>
+                        <th className="px-3 py-4 font-semibold text-sm w-32">NOTES (MARKETING)</th>
+                        <th className="px-3 py-4 font-semibold text-sm w-32 text-center">EDITOR</th>
+                        <th className="px-3 py-4 font-semibold text-sm w-16 text-center">DONE?</th>
+                        <th className="px-3 py-4 font-semibold text-sm w-16 text-center text-red-500">CANCEL</th>
+                        <th className="px-3 py-4 font-semibold text-sm w-32">NOTES (EDITORS)</th>
+                        <th className="px-3 py-4 font-semibold text-sm w-16 text-center text-purple-500">PRIORTY</th>
+                      </>
                     ) : (
                       <>
                         <th className="px-4 py-4 font-semibold text-sm w-16 text-center">تجميعه</th>
@@ -124,30 +181,34 @@ export default function App() {
                         <th className="px-6 py-4 font-semibold text-sm">اسم الدرس (OP NAME)</th>
                         <th className="px-4 py-4 font-semibold text-sm w-36 text-center">OP SHEET</th>
                       </>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border bg-white/40 backdrop-blur-sm">
                   {filteredData.length > 0 ? filteredData.map((item, idx) => {
                     
                     const getChipColor = (val: string) => {
                       if (!val) return 'bg-gray-100 text-gray-600 border-gray-200';
-                      if (val.includes('اسكندريه') || val.includes('علوم')) return 'bg-blue-100 text-blue-800 border-blue-200';
-                      if (val.includes('القاهره') || val.includes('ماث') || val.includes('2025')) return 'bg-red-100 text-red-800 border-red-200';
+                      if (val.includes('اسكندريه') || val.includes('علوم') || val.includes('KIRO')) return 'bg-blue-100 text-blue-800 border-blue-200';
+                      if (val.includes('القاهره') || val.includes('ماث') || val.includes('2025') || val.includes('BASEL')) return 'bg-red-100 text-red-800 border-red-200';
                       if (val.includes('رياضه')) return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-                      if (val.includes('ساينس')) return 'bg-green-100 text-green-800 border-green-200';
+                      if (val.includes('ساينس') || val.includes('HASSANEN')) return 'bg-green-100 text-green-800 border-green-200';
                       if (val.includes('دراسات')) return 'bg-orange-100 text-orange-800 border-orange-200';
                       return 'bg-gray-100 text-gray-700 border-gray-200';
                     };
 
-                    const DropdownChip = ({ value }: { value: string }) => (
-                      <div className="relative inline-flex items-center w-full max-w-[120px] mx-auto">
+                    const DropdownChip = ({ value, isEditor }: { value: string, isEditor?: boolean }) => (
+                      <div className={`relative inline-flex items-center w-full mx-auto ${isEditor ? 'max-w-[140px]' : 'max-w-[120px]'}`}>
                         <select 
                           className={`w-full appearance-none px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/50 text-center ${getChipColor(value)}`}
                           defaultValue={value}
                         >
                           <option value={value}>{value}</option>
-                          <option value="تعديل...">تعديل...</option>
+                          {isEditor ? (
+                            <>
+                              <option value="KIRO">KIRO</option>
+                              <option value="HASSANEN">HASSANEN</option>
+                              <option value="BASEL">BASEL</option>
+                            </>
+                          ) : (
+                            <option value="تعديل...">تعديل...</option>
+                          )}
                         </select>
                         <div className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-current opacity-70">
                           <svg className="fill-current h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
@@ -155,22 +216,28 @@ export default function App() {
                       </div>
                     );
 
+                    if (activeGid === '1535230545') {
+                      // Custom Row component just for the Tagme3at tab to handle local state
+                      return (
+                        <TaskRow key={idx} item={item} DropdownChip={DropdownChip} />
+                      );
+                    }
+
                     return (
-                    <tr key={idx} className="hover:bg-white/50 transition-colors group">
-                      {activeGid === '1535230545' ? (
-                        <td className="px-6 py-4 font-medium arabic-text">{item.name}</td>
-                      ) : (
-                        <>
-                          <td className="px-4 py-4 text-center">
-                            <input type="checkbox" defaultChecked={item.check1} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer" />
-                          </td>
-                          <td className="px-4 py-4 text-center">
-                            <input type="checkbox" defaultChecked={item.check2} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer" />
-                          </td>
-                          <td className="px-4 py-4 text-sm text-center text-muted-foreground font-medium">{item.id}</td>
-                          <td className="px-4 py-4 text-center"><DropdownChip value={item.subject} /></td>
-                          <td className="px-4 py-4 text-center"><DropdownChip value={item.extra} /></td>
-                          <td className="px-6 py-4 text-sm font-semibold arabic-text leading-relaxed max-w-md">{item.name}</td>
+                    <tr key={idx} className="hover:bg-white/50 transition-colors group border-b border-border/50 last:border-0">
+                      <td className="px-4 py-4 text-center">
+                        <input type="checkbox" defaultChecked={item.check1} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer" />
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <input type="checkbox" defaultChecked={item.check2} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer" />
+                      </td>
+                      <td className="px-4 py-4 text-sm text-center text-muted-foreground font-medium">{item.id}</td>
+                      <td className="px-4 py-4 text-center"><DropdownChip value={item.subject} /></td>
+                      <td className="px-4 py-4 text-center"><DropdownChip value={item.extra} /></td>
+                      <td className="px-6 py-4 text-sm font-semibold arabic-text leading-relaxed max-w-md">{item.name}</td>
+                      <td className="px-4 py-4 text-center"><DropdownChip value={item.val} /></td>
+                    </tr>
+                  )})}/td>
                           <td className="px-4 py-4 text-center"><DropdownChip value={item.val} /></td>
                         </>
                       )}

@@ -1,14 +1,26 @@
 import { useState, useEffect } from 'react';
 import Papa from 'papaparse';
 
-// Mapping based on your Google Apps Script
-// Column G (7) -> Name, Column H (8) -> Val, Column E (5) -> Extra, Column C (3) -> ID/Date
-export const mapSheetRow = (row: any) => ({
-  id: row[2] || '', // Column C
-  name: row[6] || 'بدون اسم', // Column G
-  val: row[7] || '', // Column H
-  extra: row[4] || '', // Column E
-});
+// Mapping based on your Google Apps Script and sheet structure
+export const mapSheetRow = (row: any, gid: string) => {
+  // If it's the Tagme3at tab (GID: 1535230545), the name is in Column B (index 1)
+  if (gid === '1535230545') {
+    return {
+      id: '',
+      name: row[1] || 'بدون اسم', // Column B
+      val: '',
+      extra: '',
+    };
+  }
+  
+  // For all other tabs (Junior, Middle, Senior), map based on the standard structure
+  return {
+    id: row[2] || '', // Column C (Date/ID)
+    name: row[6] || 'بدون اسم', // Column G (OP NAME)
+    val: row[7] || '', // Column H (OP SHEET)
+    extra: row[4] || '', // Column E (Branch)
+  };
+};
 
 // The new standard Google Sheet ID provided by the user
 const SHEET_ID = '1GFMUIYZIfqFyrQ0nKxCcATP6T6HKj4_noqSqN2sVEsU';
@@ -29,7 +41,10 @@ export function useGoogleSheets(gid: string) {
         header: false,
         complete: (results) => {
           // Skip header row and map data
-          const parsedData = results.data.slice(1).map(mapSheetRow).filter((item: any) => item.name !== 'بدون اسم');
+          const parsedData = results.data
+            .slice(1)
+            .map((row: any) => mapSheetRow(row, gid))
+            .filter((item: any) => item.name && item.name !== 'بدون اسم');
           setData(parsedData);
           setLoading(false);
         },

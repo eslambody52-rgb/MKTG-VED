@@ -175,7 +175,13 @@ export default function App() {
                         </>
                       )}
                     </tr>
-                  )})}
+                  )}) : (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground font-medium">
+                        لا توجد بيانات متاحة في هذا القسم حالياً.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             )}

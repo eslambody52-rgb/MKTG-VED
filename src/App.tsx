@@ -858,9 +858,9 @@ export default function App() {
 
   const teachers = useMemo(() => {
     if (!isOperations) return [];
-    const set = new Set(liveData.map((i: any) => i.teacher).filter(Boolean));
+    const set = new Set(combinedData.map((i: any) => i.teacher).filter(Boolean));
     return Array.from(set).sort() as string[];
-  }, [liveData, isOperations]);
+  }, [combinedData, isOperations]);
 
   const years = useMemo(() => {
     if (!isOperations) return [];

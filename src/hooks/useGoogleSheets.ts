@@ -61,11 +61,25 @@ export function useGoogleSheets(gid: string) {
       let rows: any[][] = [];
 
       if (gid === OPERATIONS_GID) {
-        // ── Private sheet → call our Vercel API route ─────────────────────
-        const res = await fetch(`/api/sheet?gid=${gid}&t=${Date.now()}`);
-        if (!res.ok) throw new Error(`API error: ${res.status}`);
-        const json = await res.json();
-        rows = json.rows || [];
+        // ── Private sheet → call our Vercel API route, fallback to static test.json on static hosts (e.g. GitHub Pages) ─────────────────────
+        try {
+          const res = await fetch(`/api/sheet?gid=${gid}&t=${Date.now()}`);
+          if (!res.ok) throw new Error(`API error: ${res.status}`);
+          const text = await res.text();
+          try {
+            const json = JSON.parse(text);
+            rows = json.rows || [];
+          } catch(e) {
+            throw new Error('Not JSON response');
+          }
+        } catch(err) {
+          console.log('[Fallback] Loading static test.json for Operations sheet (GitHub Pages mode)');
+          const fallbackRes = await fetch('/test.json');
+          if (fallbackRes.ok) {
+            const json = await fallbackRes.json();
+            rows = json.rows || [];
+          }
+        }
       } else {
         // ── Public published sheet → direct CSV fetch ─────────────────────
         const url = `https://docs.google.com/spreadsheets/d/e/${DEFAULT_PUBLISHED_ID}/pub?gid=${gid}&output=csv&single=true`;

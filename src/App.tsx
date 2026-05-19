@@ -856,6 +856,14 @@ export default function App() {
     { label: 'إحصائيات التجميعات 📊', gid: 'analytics_tagme3at', icon: BarChart3, colorHex: '#10b981' },
   ];
 
+  const combinedData = useMemo(() => {
+    const currentLocal = localEntries[activeGid] || [];
+    if (isOperations) return [...currentLocal, ...liveData];
+    if (isTagme3at) return [...currentLocal, ...tagmeTransfers, ...liveData];
+    const transfers = youtubeItems[activeGid] || [];
+    return [...currentLocal, ...transfers, ...liveData];
+  }, [liveData, youtubeItems, tagmeTransfers, localEntries, activeGid, isOperations, isTagme3at]);
+
   const teachers = useMemo(() => {
     if (!isOperations) return [];
     const set = new Set(combinedData.map((i: any) => i.teacher).filter(Boolean));
@@ -874,13 +882,6 @@ export default function App() {
     return Array.from(set) as string[];
   }, [liveData, isOperations, isTagme3at, isAnalyticsTagme]);
 
-  const combinedData = useMemo(() => {
-    const currentLocal = localEntries[activeGid] || [];
-    if (isOperations) return [...currentLocal, ...liveData];
-    if (isTagme3at) return [...currentLocal, ...tagmeTransfers, ...liveData];
-    const transfers = youtubeItems[activeGid] || [];
-    return [...currentLocal, ...transfers, ...liveData];
-  }, [liveData, youtubeItems, tagmeTransfers, localEntries, activeGid, isOperations, isTagme3at]);
 
   const filteredData = useMemo(() => {
     return combinedData.filter((item: any) => {

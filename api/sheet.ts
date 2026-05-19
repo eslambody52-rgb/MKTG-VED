@@ -3,6 +3,29 @@ import { google } from 'googleapis';
 
 const SPREADSHEET_ID = '1lh0-kh9MlT4AZCi3-QBn0fkkiNpMcpg6qcoDfBeNK8g';
 
+function formatPrivateKey(key: string | undefined): string {
+  if (!key) return '';
+  let formatted = key.replace(/"/g, '').trim();
+  formatted = formatted.replace(/\\n/g, '\n');
+  
+  // If newlines were stripped, rebuild the PEM format
+  if (!formatted.includes('\n')) {
+    const beginHeader = '-----BEGIN PRIVATE KEY-----';
+    const endHeader = '-----END PRIVATE KEY-----';
+    if (formatted.includes(beginHeader) && formatted.includes(endHeader)) {
+      let body = formatted.substring(
+        formatted.indexOf(beginHeader) + beginHeader.length,
+        formatted.indexOf(endHeader)
+      );
+      body = body.replace(/\s+/g, '');
+      const matchedBody = body.match(/.{1,64}/g);
+      const bodyLines = matchedBody ? matchedBody.join('\n') : body;
+      formatted = `${beginHeader}\n${bodyLines}\n${endHeader}`;
+    }
+  }
+  return formatted;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Allow CORS for local dev
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -14,8 +37,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Authenticate using Service Account credentials from environment variables
     const auth = new google.auth.GoogleAuth({
       credentials: {
-        client_email: process.env.GOOGLE_CLIENT_EMAIL,
-        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        client_email: process.env.GOOGLE_CLIENT_EMAIL?.replace(/"/g, '').trim(),
+        private_key: formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY),
       },
       scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
     });

@@ -74,7 +74,7 @@ export function useGoogleSheets(gid: string) {
           }
         } catch(err) {
           console.log('[Fallback] Loading static test.json for Operations sheet (GitHub Pages mode)');
-          const fallbackRes = await fetch('./test.json');
+          const fallbackRes = await fetch('/test.json');
           if (fallbackRes.ok) {
             const json = await fallbackRes.json();
             rows = json.rows || [];

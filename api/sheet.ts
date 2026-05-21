@@ -1,7 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { google } from 'googleapis';
 
-const SPREADSHEET_ID = '1lh0-kh9MlT4AZCi3-QBn0fkkiNpMcpg6qcoDfBeNK8g';
+const getSpreadsheetId = (gid: any) => {
+  const g = String(gid || '');
+  if (g === '1476192399' || g === '2086331904') {
+    return '1Hm7noXxv8ITMU3dNXQmqFEzfZY1mZlBJ4bQ9_ZIR0-M';
+  }
+  return '1lh0-kh9MlT4AZCi3-QBn0fkkiNpMcpg6qcoDfBeNK8g';
+};
 
 function formatPrivateKey(key: string | undefined): string {
   if (!key) return '';
@@ -44,10 +50,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     const sheets = google.sheets({ version: 'v4', auth });
+    const targetSpreadsheetId = getSpreadsheetId(gid);
 
     // Get all sheet names to find the one with matching GID
     const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: targetSpreadsheetId,
     });
 
     // Find sheet name by GID
@@ -63,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Fetch the data
     const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: targetSpreadsheetId,
       range: sheetName,
     });
 
@@ -75,14 +82,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
     
     // Performance optimization for large sheets
-    if (String(gid) === '2086331904') {
+    if (String(gid) === '1476192399' || String(gid) === '2086331904') {
+      const isNewGid = String(gid) === '1476192399';
       validRows = validRows
-        .map((row: any[]) => row.slice(0, 7)) // Only need first 7 columns
+        .map((row: any[]) => {
+          if (isNewGid) {
+            const sliced = row.slice(0, 21);
+            while (sliced.length < 21) sliced.push('');
+            // Fallback: extract play URL from iframe embed in col 16 if col 17 is empty
+            if (!sliced[17] && sliced[16]) {
+              const m = String(sliced[16]).match(/mediadelivery\.net\/embed\/(\d+)\/([a-f0-9-]+)/i);
+              if (m) {
+                sliced[17] = `https://iframe.mediadelivery.net/play/${m[1]}/${m[2]}`;
+              }
+            }
+            return sliced;
+          } else {
+            return row.slice(0, 7);
+          }
+        })
         .filter((row: any[]) => {
-          if (!row[4] || row[4] === 'بدون اسم') return false;
+          const nameIdx = isNewGid ? 11 : 4;
+          const filingIdx = isNewGid ? 12 : 5;
+          if (!row[nameIdx] || row[nameIdx] === 'بدون اسم') return false;
           // Filter out rows ending with Q and a number, optionally followed by closing brace (e.g., Q1, Q20, Q20})
           const qRegex = /Q\s*\d+[^a-zA-Z0-9]*$/i;
-          if (qRegex.test(String(row[4]).trim()) || (row[5] && qRegex.test(String(row[5]).trim()))) {
+          if (qRegex.test(String(row[nameIdx]).trim()) || (row[filingIdx] && qRegex.test(String(row[filingIdx]).trim()))) {
             return false;
           }
           return true;

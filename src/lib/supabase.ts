@@ -27,6 +27,7 @@ export type UserProfile = {
   allowed_tabs: string[];
   is_active: boolean;
   team?: 'marketing' | 'video' | '';
+  default_mode?: 'operations' | 'reels' | 'designers';
   created_at: string;
 };
 

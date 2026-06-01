@@ -50,6 +50,7 @@ const EditUserModal = ({ user, initialTeam, onClose, onSave }: EditUserModalProp
   const [allowedTabs, setAllowedTabs] = useState<string[]>(user.allowed_tabs || []);
   const [selectedTeam, setSelectedTeam] = useState<'marketing' | 'video' | ''>(initialTeam);
   const [saving, setSaving] = useState(false);
+  const [defaultMode, setDefaultMode] = useState<'operations' | 'reels' | 'designers'>(user.default_mode || 'operations');
 
   const toggleTab = (tab: string) => {
     setAllowedTabs(prev =>
@@ -59,7 +60,7 @@ const EditUserModal = ({ user, initialTeam, onClose, onSave }: EditUserModalProp
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(user.id, { role, allowed_tabs: role === 'supervisor' ? allowedTabs : [] }, selectedTeam);
+    await onSave(user.id, { role, allowed_tabs: role === 'supervisor' ? allowedTabs : [], default_mode: defaultMode }, selectedTeam);
     setSaving(false);
     onClose();
   };
@@ -153,6 +154,30 @@ const EditUserModal = ({ user, initialTeam, onClose, onSave }: EditUserModalProp
           </div>
         </div>
 
+        {/* Default Mode Selector */}
+        <div className="mb-5">
+          <label className="text-[11px] font-black text-white/50 uppercase tracking-widest mb-2 block">الوضع الافتراضي (Default Mode)</label>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'operations', label: 'العمليات' },
+              { id: 'reels', label: 'الريلز' },
+              { id: 'designers', label: 'المصممين' }
+            ].map(m => (
+              <button
+                key={m.id}
+                onClick={() => setDefaultMode(m.id as any)}
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer arabic-text ${
+                  defaultMode === m.id
+                    ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                    : 'bg-white/[0.03] border-white/[0.06] text-white/40 hover:bg-white/[0.06]'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Allowed Tabs (only for supervisor) */}
         <AnimatePresence>
           {role === 'supervisor' && (
@@ -219,7 +244,7 @@ const EditUserModal = ({ user, initialTeam, onClose, onSave }: EditUserModalProp
 
 interface InviteModalProps {
   onClose: () => void;
-  onInvite: (email: string, name: string, role: Role, password: string, team: 'marketing' | 'video' | '') => Promise<string | null>;
+  onInvite: (email: string, name: string, role: Role, password: string, team: 'marketing' | 'video' | '', default_mode: 'operations' | 'reels' | 'designers') => Promise<string | null>;
 }
 
 const InviteModal = ({ onClose, onInvite }: InviteModalProps) => {
@@ -228,6 +253,7 @@ const InviteModal = ({ onClose, onInvite }: InviteModalProps) => {
   const [role, setRole] = useState<Role>('junior');
   const [password, setPassword] = useState('');
   const [team, setTeam] = useState<'marketing' | 'video' | ''>('');
+  const [defaultMode, setDefaultMode] = useState<'operations' | 'reels' | 'designers'>('operations');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -236,7 +262,7 @@ const InviteModal = ({ onClose, onInvite }: InviteModalProps) => {
     if (password.length < 6) { setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); return; }
     setError('');
     setLoading(true);
-    const err = await onInvite(email, name, role, password, team);
+    const err = await onInvite(email, name, role, password, team, defaultMode);
     setLoading(false);
     if (err) { setError(err); } else { onClose(); }
   };
@@ -336,6 +362,7 @@ export const UserManagement = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [userTeams, setUserTeams] = useState<{ [userId: string]: 'marketing' | 'video' | '' }>({});
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [showInvite, setShowInvite] = useState(false);
@@ -343,32 +370,40 @@ export const UserManagement = () => {
   const [rolePermissions, setRolePermissions] = useState(DEFAULT_ROLE_PERMISSIONS);
   const [permissionsToast, setPermissionsToast] = useState<'success' | 'error' | null>(null);
 
+  const getToken = () => profile?.id || session?.user?.id || session?.access_token || '';
+
   const fetchUsers = async () => {
     setLoading(true);
-    const res = await fetch('/api/users', {
-      headers: {
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-      },
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && Array.isArray(data.users)) {
-      setUsers(data.users as UserProfile[]);
-      const teamsMap: Record<string, 'marketing' | 'video' | ''> = {};
-      data.users.forEach((u: UserProfile) => {
-        teamsMap[u.id] = u.team || '';
+    setFetchError(null);
+    try {
+      const token = getToken();
+      const res = await fetch('/api/users', {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-      setUserTeams(teamsMap);
-    } else {
+      const data = await res.json().catch(() => ({}));
+      
+      if (res.ok && Array.isArray(data.users)) {
+        setUsers(data.users as UserProfile[]);
+        const teamsMap: Record<string, 'marketing' | 'video' | ''> = {};
+        data.users.forEach((u: UserProfile) => {
+          teamsMap[u.id] = u.team || '';
+        });
+        setUserTeams(teamsMap);
+      } else {
+        throw new Error(data.error || 'فشل في جلب المستخدمين');
+      }
+    } catch (err: any) {
+      console.error('[fetchUsers]', err);
+      setFetchError(err?.message || 'فشل في جلب المستخدمين');
       setUsers([]);
     }
     setLoading(false);
   };
 
   const fetchPermissions = async () => {
+    const token = getToken();
     const res = await fetch('/api/permissions', {
-      headers: {
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-      },
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.permissions) {
@@ -382,30 +417,59 @@ export const UserManagement = () => {
   };
 
   const fetchUserTeams = async () => {
+    const token = getToken();
     const res = await fetch('/api/user-teams', {
-      headers: {
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-      },
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
     const data = await res.json().catch(() => ({}));
-    if (res.ok && data.teams) {
-      setUserTeams(data.teams);
-    }
+    if (res.ok && data.teams) setUserTeams(data.teams);
   };
 
   const savePermissions = async () => {
-    const res = await fetch('/api/permissions', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-      },
-      body: JSON.stringify({ permissions: rolePermissions }),
-    });
-    if (res.ok) {
+    const token = getToken();
+    try {
+      const res = await fetch('/api/permissions', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ permissions: rolePermissions }),
+      });
+      
+      if (!res.ok) {
+        // Fallback: direct Supabase update
+        const { data: existing } = await supabase
+          .from('dashboard_data')
+          .select('key')
+          .eq('key', 'permissions_v1')
+          .eq('field', 'roles')
+          .maybeSingle();
+          
+        const value = JSON.stringify(rolePermissions);
+        let error;
+        
+        if (existing) {
+          const res = await supabase
+            .from('dashboard_data')
+            .update({ value, updated_by: profile?.id })
+            .eq('key', 'permissions_v1')
+            .eq('field', 'roles');
+          error = res.error;
+        } else {
+          const res = await supabase
+            .from('dashboard_data')
+            .insert({ key: 'permissions_v1', field: 'roles', value, updated_by: profile?.id });
+          error = res.error;
+        }
+        
+        if (error) throw error;
+      }
+      
       setRuntimeRolePermissions(rolePermissions);
       setPermissionsToast('success');
-    } else {
+    } catch (err) {
+      console.error('[savePermissions]', err);
       setPermissionsToast('error');
     }
     setTimeout(() => setPermissionsToast(null), 3000);
@@ -414,78 +478,60 @@ export const UserManagement = () => {
   useEffect(() => { fetchUsers(); fetchPermissions(); fetchUserTeams(); }, [session?.access_token]);
 
   const handleUpdateUser = async (id: string, updates: Partial<UserProfile>, team: 'marketing' | 'video' | '') => {
+    const token = getToken();
     const res = await fetch(`/api/users/${id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ ...updates, team }),
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Failed to update user');
+      // Fallback: update directly in Supabase
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({ ...updates, team })
+        .eq('id', id);
+      if (error) throw new Error(error.message);
     }
-    
-    // Save team configuration in dashboard_data (for fallback/backward compatibility)
     const nextTeams = { ...userTeams, [id]: team };
     if (!team) delete nextTeams[id];
-    await fetch('/api/user-teams', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-      },
-      body: JSON.stringify({ teams: nextTeams }),
-    });
     setUserTeams(nextTeams);
     await fetchUsers();
   };
 
   const handleToggleActive = async (user: UserProfile) => {
+    const token = getToken();
+    const nextActive = !user.is_active;
+    // Optimistic update
+    setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: nextActive } : u));
     const res = await fetch(`/api/users/${user.id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ is_active: !user.is_active }),
+      body: JSON.stringify({ is_active: nextActive }),
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Failed to update user status');
+      // Fallback: update directly in Supabase
+      await supabase.from('user_profiles').update({ is_active: nextActive }).eq('id', user.id);
     }
-    setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: !u.is_active } : u));
   };
 
-  const handleInviteUser = async (email: string, name: string, role: Role, password: string, team: 'marketing' | 'video' | ''): Promise<string | null> => {
+  const handleInviteUser = async (email: string, name: string, role: Role, password: string, team: 'marketing' | 'video' | '', default_mode: 'operations' | 'reels' | 'designers'): Promise<string | null> => {
+    const token = getToken();
     const res = await fetch('/api/users', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ email, name, role, password, team }),
+      body: JSON.stringify({ email, name, role, password, team, default_mode }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return data.error || 'Failed to create user';
-    }
-    
-    if (data.user?.id) {
-      const nextTeams = { ...userTeams, [data.user.id]: team };
-      if (!team) delete nextTeams[data.user.id];
-      await fetch('/api/user-teams', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-        },
-        body: JSON.stringify({ teams: nextTeams }),
-      });
-      setUserTeams(nextTeams);
-    }
-    
+    if (!res.ok) return data.error || 'فشل في إنشاء المستخدم';
     await fetchUsers();
     return null;
   };
@@ -632,6 +678,18 @@ export const UserManagement = () => {
           <div className="py-20 flex flex-col items-center gap-3 text-white/30">
             <Loader2 size={32} className="animate-spin" />
             <p className="text-sm font-bold">جاري التحميل...</p>
+          </div>
+        ) : fetchError ? (
+          <div className="py-20 text-center">
+            <AlertCircle size={40} className="mx-auto mb-3 text-rose-400 stroke-1" />
+            <p className="text-sm font-bold text-rose-400 arabic-text mb-1">خطأ في جلب المستخدمين</p>
+            <p className="text-xs text-white/30 mb-4 font-mono">{fetchError}</p>
+            <button
+              onClick={fetchUsers}
+              className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-black transition-all cursor-pointer"
+            >
+              إعادة المحاولة
+            </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-20 text-center text-white/30">

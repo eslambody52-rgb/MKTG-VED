@@ -41,6 +41,8 @@ import { useGoogleSheets } from './hooks/useGoogleSheets';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginPage } from './pages/LoginPage';
 import { UserManagement } from './components/UserManagement';
+import DesignersDashboard from './components/DesignersDashboard';
+import { DesignAnalytics } from './components/DesignAnalytics';
 import { ReelsAnalytics } from './components/ReelsAnalytics';
 import { supabase, PERMISSIONS, ROLE_LABELS, ROLE_COLORS, DEFAULT_ROLE_PERMISSIONS, setRuntimeRolePermissions } from './lib/supabase';
 
@@ -1110,16 +1112,45 @@ const TagmeRow = ({
               {item.youtubeLink ? (
                 (() => {
                   const parsed = parseDriveLink(item.youtubeLink);
+                  const ytMatch = item.youtubeLink.match(
+                    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/))([A-Za-z0-9_-]{11})/
+                  );
+                  const ytThumb = ytMatch
+                    ? `https://img.youtube.com/vi/${ytMatch[1]}/mqdefault.jpg`
+                    : null;
                   return (
-                    <a 
-                      href={parsed.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="px-2 py-1 rounded-lg bg-red-500/15 text-red-400 font-mono text-[10px] underline cursor-pointer shadow-sm truncate max-w-[110px]"
-                      title={parsed.url}
-                    >
-                      {parsed.url}
-                    </a>
+                    <div className="flex flex-col items-center gap-1.5">
+                      <a
+                        href={parsed.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2 py-1 rounded-lg bg-red-500/15 text-red-400 font-mono text-[10px] underline cursor-pointer shadow-sm truncate max-w-[110px]"
+                        title={parsed.url}
+                      >
+                        {parsed.url}
+                      </a>
+                      <div
+                        onClick={() => parsed.url && window.open(parsed.url, '_blank')}
+                        className="relative group/preview mt-1.5 w-32 h-20 rounded-xl overflow-hidden border border-white/10 hover:border-red-500/50 shadow-md bg-white/5 transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                        title="فتح على يوتيوب"
+                      >
+                        {ytThumb ? (
+                          <img
+                            src={ytThumb}
+                            alt="YouTube thumbnail"
+                            className="w-full h-full object-cover"
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        ) : (
+                          <PreviewImage url={item.youtubeLink} />
+                        )}
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/preview:opacity-100 transition-opacity bg-black/30">
+                          <svg viewBox="0 0 24 24" fill="white" className="w-8 h-8 drop-shadow-lg">
+                            <path d="M8 5v14l11-7z"/>
+                          </svg>
+                        </div>
+                      </div>
+                    </div>
                   );
                 })()
               ) : (
@@ -1527,7 +1558,7 @@ const ShootingRow = ({ item, index, activeGid, onToggleFilmed, loadingFilmedCode
   }, [item]);
 
   const generatedCode = useMemo(() => {
-    if (!['1436746012', '1939073164', '798246690'].includes(activeGid)) return item.id;
+    if (!['1436746012', '1939073164'].includes(activeGid)) return item.id;
     const prefix = `${editForm.year}-${editForm.teacher}-${editForm.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
     const currentPrefix = `${item.year}-${item.teacher}-${item.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
     if (prefix === currentPrefix) return item.id;
@@ -1557,7 +1588,7 @@ const ShootingRow = ({ item, index, activeGid, onToggleFilmed, loadingFilmedCode
 
     // 2. Generate new code if year, teacher, or extraName changes
     let newCode = item.id;
-    if (['1436746012', '1939073164', '798246690'].includes(activeGid) && (fieldName === 'year' || fieldName === 'teacher' || fieldName === 'extraName')) {
+    if (['1436746012', '1939073164'].includes(activeGid) && (fieldName === 'year' || fieldName === 'teacher' || fieldName === 'extraName')) {
       const prefix = `${updatedForm.year}-${updatedForm.teacher}-${updatedForm.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
       const currentPrefix = `${item.year}-${item.teacher}-${item.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
       if (prefix !== currentPrefix) {
@@ -2668,13 +2699,25 @@ const TagmeAnalyticsDashboard = ({ combinedData, tagmeTransfers, loading, taskSt
     const transfersCount = (tagmeTransfers || []).length;
 
     // Stage breakdown
-    const stageMap: Record<string, { count: number, completed: number, priority: number }> = {};
+    const stageMap: Record<string, { count: number, completed: number, priority: number, durations: number[] }> = {};
     dataList.forEach((i: any) => {
       if (!i) return;
       const stage = (i.opSheet || 'أخرى').trim();
-      if (!stageMap[stage]) stageMap[stage] = { count: 0, completed: 0, priority: 0 };
+      if (!stageMap[stage]) stageMap[stage] = { count: 0, completed: 0, priority: 0, durations: [] };
       stageMap[stage].count++;
-      if (isCompleted(i)) stageMap[stage].completed++;
+      if (isCompleted(i)) {
+        stageMap[stage].completed++;
+        if (i.date && i.time) {
+          try {
+            const start = new Date(i.date);
+            const end = new Date(i.time);
+            if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+              const diffDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+              stageMap[stage].durations.push(diffDays);
+            }
+          } catch (e) {}
+        }
+      }
       const key = i.uniqueKey || generateKey(i);
       const isPri = taskPriorities && taskPriorities[key] !== undefined 
         ? !!taskPriorities[key] 
@@ -2896,43 +2939,109 @@ const TagmeAnalyticsDashboard = ({ combinedData, tagmeTransfers, loading, taskSt
         </div>
       </div>
 
-      {/* Editor Priority Breakdown */}
-      {stats.editorMap.some(([, d]) => (d as any).priority > 0) && (
-        <div className="glass-panel p-8 rounded-3xl border border-purple-500/20 space-y-6 relative overflow-hidden bg-purple-500/[0.02]">
-          <div className="flex items-center justify-between border-b border-white/10 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 animate-pulse">
-                <AlertCircle size={20} />
-              </div>
-              <h3 className="text-xl font-black text-white arabic-text">توزيع الأولويات على المحررين</h3>
+      {/* Production Distribution & Speed Card */}
+      <div className="glass-panel p-8 rounded-3xl border border-white/10 space-y-6 relative overflow-hidden group hover:border-emerald-500/30 transition-all">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+              <Layers size={20} />
             </div>
-            <div className="flex items-center gap-3">
-              <span className={`text-xs font-black px-3 py-1.5 rounded-xl border ${
-                stats.priority >= TAGME_DAILY_PRIORITY_LIMIT 
-                  ? 'bg-rose-500/15 border-rose-500/30 text-rose-400' 
-                  : 'bg-purple-500/15 border-purple-500/30 text-purple-400'
-              }`}>
-                الحد الأقصى: {TAGME_DAILY_PRIORITY_LIMIT} | نشط: {stats.priority}
-              </span>
-            </div>
+            <h3 className="text-xl font-black text-white arabic-text">أداء ومعدل سرعة إنتاج دفعات التجميعات</h3>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {stats.editorMap.filter(([, d]) => (d as any).priority > 0).map(([editor, data]) => {
-              const { priority: editorPriority, count } = data as { count: number, completed: number, priority: number };
+          <span className="text-xs text-emerald-300 font-bold">{stats.stageMap.length} دفعات إنتاج نشطة</span>
+        </div>
+        
+        {stats.stageMap.length === 0 ? (
+          <div className="text-center py-8 text-muted/50 arabic-text text-sm">
+            لا توجد دفعات إنتاج نشطة حالياً.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 max-h-[500px] overflow-y-auto pr-2">
+            {stats.stageMap.map(([stage, data]) => {
+              const { count, completed, priority: stagePriority, durations } = data as { count: number, completed: number, priority: number, durations: number[] };
+              const pct = count > 0 ? Math.round((completed / count) * 100) : 0;
+              const avgDuration = durations && durations.length > 0 
+                ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) 
+                : null;
+                
               return (
-                <div key={editor} className="p-4 rounded-2xl bg-white/[0.02] border border-purple-500/20 hover:border-purple-500/40 transition-all">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-black text-white arabic-text truncate">{editor}</span>
-                    <span className="text-lg font-black text-purple-400">{editorPriority}</span>
+                <div 
+                  key={stage} 
+                  className="p-5 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-emerald-500/30 hover:bg-white/[0.03] transition-all duration-300 relative group/card overflow-hidden"
+                >
+                  <div className="absolute -right-12 -top-12 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl group-hover/card:bg-emerald-500/10 transition-all duration-500" />
+                  
+                  <div className="flex justify-between items-start mb-3 relative z-10">
+                    <div className="space-y-1">
+                      <h4 className="text-base font-black text-white group-hover/card:text-emerald-400 transition-colors">{stage}</h4>
+                      <p className="text-[10px] text-emerald-300/60 uppercase font-bold tracking-wider arabic-text">دفعة إنتاج</p>
+                    </div>
+                    <div className="flex gap-2">
+                      {stagePriority > 0 && (
+                        <span className="text-[9px] font-black px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 animate-pulse">
+                          ⚡ {stagePriority} أولوية
+                        </span>
+                      )}
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-white/5 text-muted border border-white/5 font-mono">
+                        {pct}%
+                      </span>
+                    </div>
                   </div>
-                  <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-                    <div className="bg-purple-500 h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, (editorPriority/count)*100)}%` }} />
+
+                  <div className="space-y-3.5 relative z-10">
+                    <div className="flex justify-between text-xs font-bold text-white/70">
+                      <span className="arabic-text">معدل الإنجاز</span>
+                      <div className="flex gap-3 font-mono">
+                        <span className="text-emerald-400">{completed} مكتمل</span>
+                        <span className="text-white/40">/</span>
+                        <span className="text-white">{count} إجمالي</span>
+                      </div>
+                    </div>
+                    
+                    <div className="w-full bg-white/5 rounded-full h-2 overflow-hidden p-0.5 flex">
+                      <div 
+                        className="bg-gradient-to-l from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-1000 shadow-sm" 
+                        style={{ width: `${pct}%` }} 
+                      />
+                      <div 
+                        className="bg-white/10 h-full transition-all duration-1000 rounded-full" 
+                        style={{ width: `${100 - pct}%` }} 
+                      />
+                    </div>
+
+                    {/* Speed Pill (How long it takes on average) */}
+                    <div className="mt-2 flex items-center justify-between text-[10px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 px-2.5 py-1.5 rounded-xl shadow-inner">
+                      <span className="arabic-text">⏱️ متوسط وقت الإنتاج:</span>
+                      <span className="font-bold">
+                        {avgDuration !== null 
+                          ? `${avgDuration} ${avgDuration === 1 ? 'يوم' : avgDuration === 2 ? 'يومين' : 'أيام'}` 
+                          : 'تحت التشغيل...'}
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-[9px] text-muted mt-1">{editorPriority} أولوية من {count} مهمة</p>
                 </div>
               );
             })}
           </div>
+        )}
+      </div>
+
+      {/* Active Priorities */}
+      {stats.priority > 0 && (
+        <div className="glass-panel p-6 rounded-3xl border border-purple-500/20 flex items-center justify-between bg-purple-500/[0.02] mt-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 animate-pulse">
+              <AlertCircle size={20} />
+            </div>
+            <h3 className="text-lg font-black text-white arabic-text">الأولويات النشطة حالياً</h3>
+          </div>
+          <span className={`text-sm font-black px-4 py-2 rounded-xl border ${
+            stats.priority >= TAGME_DAILY_PRIORITY_LIMIT 
+              ? 'bg-rose-500/15 border-rose-500/30 text-rose-400' 
+              : 'bg-purple-500/15 border-purple-500/30 text-purple-400'
+          }`}>
+            {stats.priority} / {TAGME_DAILY_PRIORITY_LIMIT}
+          </span>
         </div>
       )}
     </div>
@@ -2945,19 +3054,188 @@ function App() {
   const [rolePermissions, setRolePermissions] = useState<any>(DEFAULT_ROLE_PERMISSIONS);
   const [activeGid, setActiveGid] = useState('1476192399');
   const [activeLabel, setActiveLabel] = useState('Operations');
-  const [appMode, setAppMode] = useState<'OP' | 'REELS'>('OP');
+  const [appMode, setAppMode] = useState<'OP' | 'REELS' | 'DESIGNERS'>('OP');
+  
+  // Set default mode on login
+  useEffect(() => {
+    if (profile?.default_mode === 'reels') {
+      setAppMode('REELS');
+      setActiveGid('1436746012');
+      setActiveLabel('Shooting');
+    } else if (profile?.default_mode === 'designers') {
+      setAppMode('DESIGNERS');
+      setActiveGid('501319673');
+      setActiveLabel('Designers');
+    } else if (profile) {
+      setAppMode('OP');
+      setActiveGid('497207661');
+      setActiveLabel('Junior 4');
+    }
+  }, [profile?.default_mode]);
   const isUsersPage = activeGid === '__users__';
+  const isDesignersPage = activeGid === '501319673';
+  const isDesignAnalytics = activeGid === 'design-analytics';
+  const isDesignersMode = isDesignersPage || isDesignAnalytics;
 
   const isOperations = activeGid === '1476192399';
   const isTagme3at = activeGid === '1535230545';
   const isAnalyticsTagme = activeGid === 'analytics_tagme3at';
   const isReelsAnalytics = activeGid === 'reels-analytics';
-  const isReelsStage = ['1436746012', '1939073164', '0', '798246690'].includes(activeGid);
-  const isStage = !isOperations && !isTagme3at && !isAnalyticsTagme && !isReelsAnalytics;
+  const isReelsStage = ['1436746012', '1939073164', '0'].includes(activeGid);
+  const isStage = !isOperations && !isTagme3at && !isAnalyticsTagme && !isReelsAnalytics && !isDesignAnalytics;
 
-  const sheetGidToFetch = isAnalyticsTagme ? '1535230545' : isReelsAnalytics ? '1436746012' : activeGid;
-  const activeDocId = isReelsStage ? '2PACX-1vTvcQ3v1JOzacx9tcsYrbriofFyHlu7rOKKlsobvpP9vjnbHGcg_Qn9TLlbkgB2YsGiX0GO1U4wlZjd' : undefined;
-  const { data: liveData, updateData: setLiveData, loading, refresh } = useGoogleSheets(sheetGidToFetch, activeDocId);
+  const sheetGidToFetch = isAnalyticsTagme 
+    ? '1535230545' 
+    : isReelsAnalytics 
+    ? '1436746012' 
+    : isDesignAnalytics 
+    ? '501319673' 
+    : activeGid;
+
+  const activeDocId = isReelsStage 
+    ? '2PACX-1vTvcQ3v1JOzacx9tcsYrbriofFyHlu7rOKKlsobvpP9vjnbHGcg_Qn9TLlbkgB2YsGiX0GO1U4wlZjd' 
+    : isDesignersMode
+    ? '2PACX-1vRkOH2-jRtYqmkf0opn6in9TMg3oOo6FBvlGfkJjhDwn-t-CSYyrTbn4EDjNCFdvKL7tQG6nQ--jSdC'
+    : undefined;
+
+  const { data: sheetData, updateData: setSheetData, loading: sheetLoading, refresh: refreshSheet } = useGoogleSheets(sheetGidToFetch, activeDocId);
+
+  // --- Real-time Supabase Integration for Designers Dashboard ---
+  const [supabaseDesignTasks, setSupabaseDesignTasks] = useState<any[]>([]);
+  const [supabaseDesignLoading, setSupabaseDesignLoading] = useState(false);
+
+  const fetchSupabaseDesignTasks = async (isSilent = false) => {
+    const token = session?.access_token || profile?.id;
+    if (!token) return;
+    if (!isSilent) {
+      setSupabaseDesignLoading(true);
+    }
+    try {
+      const res = await fetch('/api/design-tasks', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const json = await res.json();
+        
+        const parseDbDate = (dateStr: string) => {
+          if (!dateStr) return '';
+          const clean = dateStr.split('T')[0];
+          const parts = clean.split('-');
+          if (parts.length === 3) {
+            return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}/${parts[0]}`;
+          }
+          return dateStr;
+        };
+
+        const mapped = (json.tasks || []).map((task: any) => ({
+          date: parseDbDate(task.assigned_date),
+          designer: task.designer_name || '',
+          priority: task.priority || '',
+          requester: task.requested_by || '',
+          type: task.design_type || '',
+          deadline: parseDbDate(task.deadline),
+          reference: task.reference_link || '',
+          notes: task.notes || '',
+          done: !!task.is_done,
+          completed_date: parseDbDate(task.completed_at),
+          id: task.id
+        }));
+        setSupabaseDesignTasks(mapped);
+      }
+    } catch (e) {
+      console.error('Failed to fetch design tasks from Supabase:', e);
+    } finally {
+      if (!isSilent) {
+        setSupabaseDesignLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (isDesignersMode && session) {
+      fetchSupabaseDesignTasks(false);
+    }
+  }, [isDesignersMode, session]);
+
+  // Merge Google Sheet designers data and Supabase design tasks in real-time
+  const mergedDesignTasks = useMemo(() => {
+    if (!isDesignersMode) return [];
+    
+    const combined: any[] = [];
+    const matchedSupabaseIds = new Set<string>();
+
+    const makeKey = (t: any) => {
+      const ref = String(t.reference || t.reference_link || '').trim().toLowerCase();
+      if (ref && ref !== '-' && ref !== '') return `ref:${ref}`;
+
+      const normalizeDate = (dStr: string) => {
+        if (!dStr) return '';
+        const clean = dStr.trim();
+        if (clean.includes('-')) {
+          const parts = clean.split('-');
+          if (parts.length === 3) {
+            return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}/${parts[0]}`;
+          }
+        }
+        return clean;
+      };
+
+      const date = normalizeDate(t.date || t.assigned_date);
+      const designer = String(t.designer || t.designer_name || '').trim().toUpperCase();
+      const requester = String(t.requester || t.requested_by || '').trim().toUpperCase();
+      const notes = String(t.notes || '').trim().replace(/^-$/, '');
+
+      return `key:${date}:${designer}:${requester}:${notes}`;
+    };
+
+    // Index Supabase tasks by their lookup key
+    const supabaseLookup = new Map<string, any>();
+    supabaseDesignTasks.forEach(t => {
+      supabaseLookup.set(makeKey(t), t);
+    });
+
+    // 1. Process Google Sheet tasks
+    sheetData.forEach((sheetTask: any) => {
+      const key = makeKey(sheetTask);
+      const supabaseTask = supabaseLookup.get(key);
+      if (supabaseTask) {
+        combined.push({
+          ...sheetTask,
+          ...supabaseTask,
+          done: supabaseTask.done,
+          completed_date: supabaseTask.completed_date || sheetTask.completed_date,
+          id: supabaseTask.id
+        });
+        matchedSupabaseIds.add(supabaseTask.id);
+      } else {
+        combined.push(sheetTask);
+      }
+    });
+
+    // 2. Add any Supabase tasks that do not match any row in Google Sheet
+    supabaseDesignTasks.forEach((supTask: any) => {
+      if (!matchedSupabaseIds.has(supTask.id)) {
+        combined.push(supTask);
+      }
+    });
+
+    return combined;
+  }, [isDesignersMode, sheetData, supabaseDesignTasks]);
+
+  // Dynamically resolve data, loading, and refresh based on active GID
+  const liveData = isDesignersMode ? mergedDesignTasks : sheetData;
+  const setLiveData = isDesignersMode ? setSupabaseDesignTasks : setSheetData;
+  const loading = isDesignersMode ? (sheetLoading || supabaseDesignLoading) : sheetLoading;
+  const refresh = (isSilent = false) => {
+    if (isDesignersMode) {
+      refreshSheet(isSilent);
+      return fetchSupabaseDesignTasks(isSilent);
+    } else {
+      return refreshSheet(isSilent);
+    }
+  };
 
   const [itemToasts, setItemToasts] = useState<{ id: string, name: string, filingName?: string }[]>([]);
 
@@ -3578,7 +3856,7 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
   });
 
   const generatedCode = useMemo(() => {
-    if (!['1436746012', '1939073164', '798246690', '0'].includes(activeGid)) return '';
+    if (!['1436746012', '1939073164', '0'].includes(activeGid)) return '';
     const prefix = activeGid === '0'
       ? `${shootingAddForm.year}-cut-${shootingAddForm.extraName}-`.toLowerCase().replace(/\s+/g, ' ')
       : `${shootingAddForm.year}-${shootingAddForm.teacher}-${shootingAddForm.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
@@ -3623,7 +3901,7 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
     e.preventDefault();
 
     // For Shooting / reels / Cuts sheets
-    if (['1436746012', '1939073164', '798246690', '0'].includes(activeGid)) {
+    if (['1436746012', '1939073164', '0'].includes(activeGid)) {
       if (!shootingAddForm.scriptLink || !shootingAddForm.scriptLink.trim()) {
         toast.error("يرجى إدخال رابط السكريبت");
         return;
@@ -3928,6 +4206,76 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
     window.addEventListener('mouseup', handleGlobalMouseUp);
     return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
   }, [autofillDrag]);
+
+  const handleAddDesignTask = async (taskForm: any) => {
+    const token = session?.access_token || profile?.id;
+    if (!token) {
+      toast.error("يجب تسجيل الدخول أولاً");
+      return;
+    }
+    
+    try {
+      const body = {
+        assigned_date: taskForm.date,
+        designer_name: taskForm.designer,
+        priority: taskForm.priority,
+        requested_by: taskForm.requester,
+        design_type: taskForm.type,
+        deadline: taskForm.deadline || null,
+        reference_link: taskForm.reference || '',
+        notes: taskForm.notes || '',
+        is_done: taskForm.done || false
+      };
+
+      const res = await fetch('/api/design-tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to create design task');
+      }
+
+      toast.success("تم إضافة المهمة التصميمية الجديدة بنجاح في Google Sheets وقاعدة البيانات! 🎉");
+      refresh();
+    } catch (err: any) {
+      console.error(err);
+      toast.error("حدث خطأ أثناء إضافة المهمة: " + err.message);
+      throw err;
+    }
+  };
+
+  const handleUpdateDesignTask = async (reference: string, field: string, value: any, id?: string) => {
+    const token = session?.access_token || profile?.id;
+    if (!token) return;
+
+    try {
+      const res = await fetch('/api/design-tasks/update', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ id, reference, field, value })
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to update design task');
+      }
+
+      // Refresh silently in the background
+      refresh(true);
+    } catch (err: any) {
+      console.error(err);
+      toast.error("حدث خطأ أثناء حفظ التعديل: " + err.message);
+    }
+  };
 
   const handleUpdateShootingRow = async (oldCode: string, newRowData: any[]) => {
     const token = session?.access_token || profile?.id;
@@ -4301,8 +4649,12 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
     { label: 'Shooting', gid: '1436746012', icon: Video, colorHex: '#b49fee' },
     { label: 'Ve', gid: '1939073164', icon: Video, colorHex: '#92dcf7' },
     { label: 'CUTS', gid: '0', icon: Video, colorHex: '#ff7843' },
-    { label: 'Counter', gid: '798246690', icon: Video, colorHex: '#ab4bbb' },
     { label: 'احصائيات الريلز', gid: 'reels-analytics', icon: BarChart3, colorHex: '#818cf8' },
+  ];
+
+  const designersStages = [
+    { label: 'Designers', gid: '501319673', icon: Sparkles, colorHex: '#a855f7' },
+    { label: 'احصائيات تصاميم', gid: 'design-analytics', icon: BarChart3, colorHex: '#ec4899' },
   ];
 
   const combinedData = useMemo(() => {
@@ -4671,7 +5023,7 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
         <th className="px-3 py-4 text-center th-style">CANCELO</th>
       </>
     );
-    if (['1436746012', '1939073164', '798246690'].includes(activeGid)) return ( // Shooting, Ve, Counter
+    if (['1436746012', '1939073164'].includes(activeGid)) return ( // Shooting, Ve, Counter
       <>
         <th className="px-4 py-4 text-center th-style"><ColFilter colKey="date" label="Date" /></th>
         <th className="px-3 py-4 text-center th-style"><ColFilter colKey="branch" label="Branch" /></th>
@@ -4745,7 +5097,7 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
     return Array.from(list);
   }, [uniqueTeachers]);
 
-  const colSpan = isOperations ? 7 : isTagme3at ? 9 : activeGid === '0' ? 18 : activeGid === '1939073164' ? 20 : ['1436746012', '798246690'].includes(activeGid) ? 16 : 7;
+  const colSpan = isOperations ? 7 : isTagme3at ? 9 : activeGid === '0' ? 18 : activeGid === '1939073164' ? 20 : ['1436746012'].includes(activeGid) ? 16 : 7;
 
   return (
     <div className="flex min-h-screen bg-[#05070a] text-foreground selection:bg-primary/30">
@@ -4794,16 +5146,23 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
             />
           ))}
 
-          {/* Mode Toggle Button */}
-          <div className="mt-2 mb-4 px-1">
-            <button
+          {/* Mode Switcher */}
+          <div className="mt-2 mb-4 px-4">
+            <button 
               onClick={() => {
-                const newMode = appMode === 'OP' ? 'REELS' : 'OP';
+                let newMode: 'OP' | 'REELS' | 'DESIGNERS' = 'OP';
+                if (appMode === 'OP') newMode = 'REELS';
+                else if (appMode === 'REELS') newMode = 'DESIGNERS';
+                else newMode = 'OP';
+                
                 setAppMode(newMode);
-                // Optionally auto-select the first tab of the new mode
+                
                 if (newMode === 'REELS') {
                   setActiveGid('1436746012');
                   setActiveLabel('Shooting');
+                } else if (newMode === 'DESIGNERS') {
+                  setActiveGid('501319673');
+                  setActiveLabel('Designers');
                 } else {
                   setActiveGid('497207661');
                   setActiveLabel('Junior 4');
@@ -4812,25 +5171,27 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
               className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-300 group
                 ${appMode === 'REELS' 
                   ? 'bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.15)]' 
+                  : appMode === 'DESIGNERS' 
+                  ? 'bg-gradient-to-r from-purple-500/10 to-fuchsia-500/10 border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
                   : 'bg-[#1a1c23] border-white/5 hover:border-white/10'}`}
             >
               <div className="flex items-center gap-3">
-                <div className={`p-1.5 rounded-lg transition-colors ${appMode === 'REELS' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/60 group-hover:text-white/80'}`}>
-                  {appMode === 'REELS' ? <Video size={16} /> : <FolderOpen size={16} />}
+                <div className={`p-1.5 rounded-lg transition-colors ${appMode === 'REELS' ? 'bg-emerald-500/20 text-emerald-400' : appMode === 'DESIGNERS' ? 'bg-purple-500/20 text-purple-400' : 'bg-white/5 text-white/60 group-hover:text-white/80'}`}>
+                  {appMode === 'REELS' ? <Video size={16} /> : appMode === 'DESIGNERS' ? <Sparkles size={16} /> : <FolderOpen size={16} />}
                 </div>
-                <span className={`text-[11px] font-black uppercase tracking-[0.2em] transition-colors duration-300 ${appMode === 'REELS' ? 'text-emerald-400' : 'text-white/60 group-hover:text-white/80'}`}>
-                  {appMode === 'REELS' ? 'REELS MODE' : 'OP MODE'}
+                <span className={`text-[11px] font-black uppercase tracking-[0.2em] transition-colors duration-300 ${appMode === 'REELS' ? 'text-emerald-400' : appMode === 'DESIGNERS' ? 'text-purple-400' : 'text-white/60 group-hover:text-white/80'}`}>
+                  {appMode === 'REELS' ? 'REELS MODE' : appMode === 'DESIGNERS' ? 'DESIGNERS MODE' : 'OP MODE'}
                 </span>
               </div>
-              <div className={`w-10 h-5 rounded-full p-1 transition-colors duration-300 ${appMode === 'REELS' ? 'bg-emerald-500' : 'bg-white/10'}`}>
-                <div className={`w-3 h-3 rounded-full bg-white transition-transform duration-300 ${appMode === 'REELS' ? 'translate-x-5' : 'translate-x-0'}`} />
+              <div className={`w-[46px] h-5 rounded-full p-1 transition-colors duration-300 relative ${appMode === 'REELS' ? 'bg-emerald-500' : appMode === 'DESIGNERS' ? 'bg-purple-500' : 'bg-white/10'}`}>
+                <div className={`w-3 h-3 rounded-full bg-white transition-all duration-300 absolute top-1 ${appMode === 'REELS' ? 'left-[17px]' : appMode === 'DESIGNERS' ? 'left-[30px]' : 'left-1'}`} />
               </div>
             </button>
           </div>
 
           {/* Dynamic Tabs based on Mode */}
           <div className="flex flex-col gap-1">
-            {(appMode === 'OP' ? stages.filter(s => s.gid !== '1476192399' && s.gid !== '1535230545' && s.gid !== 'analytics_tagme3at') : reelsStages)
+            {(appMode === 'DESIGNERS' ? designersStages : appMode === 'OP' ? stages.filter(s => s.gid !== '1476192399' && s.gid !== '1535230545' && s.gid !== 'analytics_tagme3at') : reelsStages)
               .filter(stage => !profile?.role || PERMISSIONS.canViewTab(profile.role, stage.label, profile.allowed_tabs || []))
               .map((stage) => (
               <SidebarItem
@@ -4926,6 +5287,20 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
       {isUsersPage ? (
         <main className="flex-1 flex flex-col min-w-0 bg-[#05070a] p-12 overflow-y-auto">
           <UserManagement />
+        </main>
+      ) : isDesignersPage ? (
+        <main className="flex-1 flex flex-col min-w-0 bg-[#05070a] p-6 lg:p-12 overflow-y-auto">
+          <DesignersDashboard 
+            liveData={liveData} 
+            setLiveData={setLiveData} 
+            loading={loading} 
+            onAddDesignTask={handleAddDesignTask} 
+            onUpdateDesignTask={handleUpdateDesignTask}
+          />
+        </main>
+      ) : isDesignAnalytics ? (
+        <main className="flex-1 flex flex-col min-w-0 bg-[#05070a] p-6 lg:p-12 overflow-y-auto">
+          <DesignAnalytics liveData={liveData} loading={loading} />
         </main>
       ) : (
         <main className="flex-1 flex flex-col min-w-0 bg-[#05070a]">
@@ -5095,7 +5470,7 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
                         {activeGid === '0' ? 'إضافة ريل / مهمة قطع جديدة' : 'إضافة درس / عملية جديدة'}
                       </h3>
                       <p className="text-xs text-muted">
-                        سيتم إضافته فورياً إلى شيت [{['1436746012', '1939073164', '798246690'].includes(activeGid) ? 'Shooting' : activeGid === '0' ? 'Cuts' : activeLabel}]
+                        سيتم إضافته فورياً إلى شيت [{['1436746012', '1939073164'].includes(activeGid) ? 'Shooting' : activeGid === '0' ? 'Cuts' : activeLabel}]
                       </p>
                     </div>
                   </div>
@@ -5105,7 +5480,7 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
                 </div>
 
                 <form onSubmit={handleAddSubmit} className="space-y-4">
-                  {['1436746012', '1939073164', '798246690', '0'].includes(activeGid) ? (
+                  {['1436746012', '1939073164', '0'].includes(activeGid) ? (
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -5484,7 +5859,7 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
                   </thead>
                   <tbody className="divide-y divide-white/[0.03]">
                     {/* Quick-Add Row for Reels Sheets GIDs */}
-                    {['1436746012', '798246690', '0'].includes(activeGid) && profile?.role && (activeGid === '1436746012' || activeGid === '0' || PERMISSIONS.canAddEntry(profile.role)) && !loading && (
+                    {['1436746012', '0'].includes(activeGid) && profile?.role && (activeGid === '1436746012' || activeGid === '0' || PERMISSIONS.canAddEntry(profile.role)) && !loading && (
                       <tr 
                         onClick={() => {
                           if (activeGid === '0') {
@@ -5597,7 +5972,7 @@ const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
                           onToggleSubscribe={toggleSubscribe}
                         />;
                       }
-                      if (['1436746012', '1939073164', '798246690'].includes(activeGid)) {
+                      if (['1436746012', '1939073164'].includes(activeGid)) {
                         return <ShootingRow key={idx} item={item} index={idx} activeGid={activeGid} onToggleFilmed={handleFilmedToggle} loadingFilmedCode={loadingFilmedCode} onUpdateShootingRow={handleUpdateShootingRow} liveData={liveData} optionsLists={{ branches: uniqueBranches, years: uniqueYears, teachers: uniqueTeachers, extraNames: uniqueExtraNames, types: uniqueTypes, formats: uniqueFormats, bys: uniqueBys, storages: uniqueStorages, editors: editorsList }} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApplyAutofill={handleApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} toast={toast} isSubscribed={subscribedTasks.includes(item.id)} onToggleSubscribe={toggleSubscribe} />;
                       }
                       return <StageRow key={idx} item={item} index={idx} tagmeTransfers={tagmeTransfers} onTagmeToggle={handleTagmeToggle} activeLabel={activeLabel} isGlowing={isGlowing} />;

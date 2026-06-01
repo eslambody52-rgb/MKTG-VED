@@ -15,6 +15,8 @@ export type PermissionConfig = {
   editBunnyLinks: boolean;
   viewAllTabs: boolean;
   dailyPriorityLimit: number;
+  dailyPriorityLimitTagme?: number;
+  dailyPriorityLimitReels?: number;
 };
 
 export type UserProfile = {
@@ -24,14 +26,15 @@ export type UserProfile = {
   role: Role;
   allowed_tabs: string[];
   is_active: boolean;
+  team?: 'marketing' | 'video' | '';
   created_at: string;
 };
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, PermissionConfig> = {
-  admin: { manageUsers: true, addEntry: true, sync: true, editEditors: true, editNotes: true, editBunnyLinks: true, viewAllTabs: true, dailyPriorityLimit: 999 },
-  manager: { manageUsers: true, addEntry: true, sync: true, editEditors: true, editNotes: true, editBunnyLinks: true, viewAllTabs: true, dailyPriorityLimit: 999 },
-  supervisor: { manageUsers: false, addEntry: false, sync: true, editEditors: true, editNotes: true, editBunnyLinks: false, viewAllTabs: false, dailyPriorityLimit: 0 },
-  junior: { manageUsers: false, addEntry: false, sync: false, editEditors: false, editNotes: false, editBunnyLinks: false, viewAllTabs: true, dailyPriorityLimit: 1 },
+  admin: { manageUsers: true, addEntry: true, sync: true, editEditors: true, editNotes: true, editBunnyLinks: true, viewAllTabs: true, dailyPriorityLimit: 999, dailyPriorityLimitTagme: 999, dailyPriorityLimitReels: 999 },
+  manager: { manageUsers: true, addEntry: true, sync: true, editEditors: true, editNotes: true, editBunnyLinks: true, viewAllTabs: true, dailyPriorityLimit: 999, dailyPriorityLimitTagme: 999, dailyPriorityLimitReels: 999 },
+  supervisor: { manageUsers: false, addEntry: false, sync: true, editEditors: true, editNotes: true, editBunnyLinks: false, viewAllTabs: false, dailyPriorityLimit: 0, dailyPriorityLimitTagme: 0, dailyPriorityLimitReels: 0 },
+  junior: { manageUsers: false, addEntry: false, sync: false, editEditors: false, editNotes: false, editBunnyLinks: false, viewAllTabs: true, dailyPriorityLimit: 1, dailyPriorityLimitTagme: 1, dailyPriorityLimitReels: 1 },
 };
 
 let runtimeRolePermissions: Record<Role, PermissionConfig> = { ...DEFAULT_ROLE_PERMISSIONS };
@@ -65,7 +68,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 
 export const ROLE_COLORS: Record<Role, string> = {
   admin: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
-  manager: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  manager: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
   supervisor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   junior: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
 };

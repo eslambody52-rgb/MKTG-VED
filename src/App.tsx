@@ -25,17 +25,23 @@ import {
   Undo2,
   Redo2,
   Copy,
+  Check,
   Pencil,
+  Sparkles,
   Link,
   LogOut,
   Shield,
   Settings,
-  MapPin
+  MapPin,
+  FolderOpen,
+  Video,
+  FileImage
 } from 'lucide-react';
 import { useGoogleSheets } from './hooks/useGoogleSheets';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginPage } from './pages/LoginPage';
 import { UserManagement } from './components/UserManagement';
+import { ReelsAnalytics } from './components/ReelsAnalytics';
 import { supabase, PERMISSIONS, ROLE_LABELS, ROLE_COLORS, DEFAULT_ROLE_PERMISSIONS, setRuntimeRolePermissions } from './lib/supabase';
 
 
@@ -47,6 +53,126 @@ const generateKey = (item: any) => {
     hash |= 0; 
   }
   return 'row-' + Math.abs(hash);
+};
+
+function parseDriveLink(val: string) {
+  if (!val) return { url: '', text: '' };
+  let s = String(val).trim();
+  
+  // Check if it is a hyperlink formula
+  const hyperlinkRegex = /=HYPERLINK\s*\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)/i;
+  const formulaMatch = s.match(hyperlinkRegex);
+  if (formulaMatch) {
+    let url = formulaMatch[2].trim();
+    let text = formulaMatch[4].trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+    return { url, text };
+  }
+  
+  let url = s;
+  const driveIdRegex = /^[a-zA-Z0-9_-]{25,55}$/;
+  
+  if (url.includes('drive.google.com') || url.includes('docs.google.com') || url.includes('spreadsheets/d/') || url.includes('document/d/') || url.includes('file/d/')) {
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      if (url.startsWith('drive.google.com') || url.startsWith('docs.google.com')) {
+        url = 'https://' + url;
+      } else if (url.startsWith('www.drive.google.com') || url.startsWith('www.docs.google.com')) {
+        url = 'https://' + url;
+      } else {
+        if (url.startsWith('/')) url = url.substring(1);
+        if (url.startsWith('file/d/')) {
+          url = 'https://drive.google.com/' + url;
+        } else if (url.startsWith('d/')) {
+          url = 'https://drive.google.com/file/' + url;
+        } else {
+          url = 'https://' + url;
+        }
+      }
+    }
+  } else if (driveIdRegex.test(url)) {
+    url = `https://drive.google.com/file/d/${url}/view?usp=sharing`;
+  } else if (!url.startsWith('http://') && !url.startsWith('https://') && url.includes('.')) {
+    url = 'https://' + url;
+  }
+
+  return {
+    url,
+    text: 'Link'
+  };
+}
+
+const PreviewImage = ({ url }: { url: string }) => {
+  const [loadStep, setLoadStep] = useState(0);
+
+  if (!url) return null;
+  const s = String(url).trim();
+  
+  let cleanUrl = s;
+  const hyperlinkRegex = /=HYPERLINK\s*\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)/i;
+  const formulaMatch = s.match(hyperlinkRegex);
+  if (formulaMatch) {
+    cleanUrl = formulaMatch[2].trim();
+  }
+
+  let fileId: string | null = null;
+  const fileIdMatch = cleanUrl.match(/\/file\/d\/([a-zA-Z0-9_-]{25,55})/);
+  if (fileIdMatch) fileId = fileIdMatch[1];
+  else {
+    const idParamMatch = cleanUrl.match(/[?&]id=([a-zA-Z0-9_-]{25,55})/);
+    if (idParamMatch) fileId = idParamMatch[1];
+    else {
+      const driveIdRegex = /^[a-zA-Z0-9_-]{25,55}$/;
+      if (driveIdRegex.test(cleanUrl)) fileId = cleanUrl;
+    }
+  }
+
+  const isDirectImage = /\.(jpg|jpeg|png|gif|webp|bmp|svg)/i.test(cleanUrl);
+
+  if (!fileId && !isDirectImage) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-white/5 text-white/30">
+        <FileImage size={14} />
+      </div>
+    );
+  }
+
+  if (loadStep >= 3) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-white/5 text-white/30">
+        <FileImage size={14} />
+      </div>
+    );
+  }
+
+  let src = '';
+  if (isDirectImage) {
+    src = cleanUrl;
+  } else {
+    if (loadStep === 0) {
+      src = `/api/drive-preview?id=${fileId}`;
+    } else if (loadStep === 1) {
+      src = `https://lh3.googleusercontent.com/d/${fileId}=w200`;
+    } else {
+      src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w200`;
+    }
+  }
+
+  return (
+    <img 
+      src={src} 
+      alt="Preview" 
+      className="w-full h-full object-cover"
+      onError={() => {
+        if (isDirectImage) {
+          setLoadStep(3);
+        } else {
+          setLoadStep(prev => prev + 1);
+        }
+      }}
+    />
+  );
 };
 
 const HistoryInput = ({ itemKey, fieldKey, value, onChange, placeholder }: any) => {
@@ -116,7 +242,6 @@ const HistoryInput = ({ itemKey, fieldKey, value, onChange, placeholder }: any) 
   };
 
   const hasValue = !!localValue;
-
   return (
     <div className="relative flex items-center justify-center group mx-auto w-full min-w-[130px] max-w-[160px]">
       {history.length > 1 && (
@@ -160,6 +285,85 @@ const HistoryInput = ({ itemKey, fieldKey, value, onChange, placeholder }: any) 
   );
 };
 
+const InlineCombobox = ({ value, onChange, options, placeholder }: any) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setInputValue('');
+      return;
+    }
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  const filteredOptions = options ? options.filter((o: string) => String(o).toLowerCase().includes(String(inputValue).toLowerCase())) : [];
+
+  const chipColors = getChipColor(value);
+
+  return (
+    <div className="relative w-full min-w-[100px]" ref={containerRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full flex items-center justify-between gap-2 text-[10px] font-black uppercase tracking-wider focus:outline-none cursor-pointer transition-all rounded-full px-3.5 py-1.5 shadow-md border ${chipColors.bg} ${chipColors.text} ${chipColors.border} hover:brightness-125 hover:scale-[1.02]`}
+      >
+        <span className="truncate max-w-[90px]">{value || placeholder || '---'}</span>
+        <ChevronDown size={10} className={`transition-transform duration-300 shrink-0 ${isOpen ? 'rotate-180 opacity-100' : 'opacity-60'}`} />
+      </button>
+      
+      {isOpen && (
+        <div className="absolute top-full mt-2 w-full min-w-[170px] bg-[#0a0e16]/95 border border-white/10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-2 z-[250] scrollbar-hide backdrop-blur-xl max-h-60 overflow-y-auto left-1/2 -translate-x-1/2 animate-fadeIn flex flex-col justify-between">
+          <div className="flex-1 overflow-y-auto">
+            {filteredOptions.map((o: string) => {
+              const optColors = getChipColor(o);
+              return (
+                <button
+                  key={o}
+                  onClick={() => { onChange(o); setIsOpen(false); }}
+                  className={`w-full flex items-center justify-center px-3 py-1.5 transition-all hover:bg-white/5 ${value === o ? 'bg-primary/5 border-r-2 border-primary' : ''}`}
+                >
+                  <span className={`px-3 py-1 rounded-full text-[10px] border font-black text-center inline-block max-w-[90%] truncate shadow-sm transition-all ${optColors.bg} ${optColors.text} ${optColors.border} hover:brightness-110`}>
+                    {o}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          
+          <div className="px-2 pt-2 mt-2 border-t border-white/10 sticky bottom-0 bg-[#0a0e16]/95 z-10 pb-1">
+             <input 
+                type="text" 
+                placeholder="+ ابحث أو ضف جديد..."
+                value={inputValue}
+                onChange={e => setInputValue(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && inputValue.trim()) {
+                    onChange(inputValue.trim());
+                    setIsOpen(false);
+                  }
+                }}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-bold text-white outline-none focus:border-primary transition-all arabic-text"
+             />
+             {inputValue.trim() && !filteredOptions.includes(inputValue.trim()) && (
+               <button
+                 onClick={() => { onChange(inputValue.trim()); setIsOpen(false); }}
+                 className="w-full text-center py-2 text-[10px] font-black tracking-wider transition-all hover:bg-primary/20 text-primary bg-primary/10 mt-2 rounded-lg border border-primary/20 cursor-pointer"
+               >
+                 + إضافة: {inputValue.trim()}
+               </button>
+             )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CustomSelect = ({ value, onChange, options, placeholder, isColumn = false }: any) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -174,14 +378,21 @@ const CustomSelect = ({ value, onChange, options, placeholder, isColumn = false 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const displayVal = value === 'All' ? placeholder : value;
+  const chipColors = getChipColor(value === 'All' ? '' : value);
+
   return (
     <div className="relative" ref={containerRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest focus:outline-none cursor-pointer transition-all ${isColumn ? 'bg-white/5 border border-white/10 hover:bg-white/10 rounded-xl px-3 py-1.5 min-w-[100px] justify-between shadow-lg text-white/90' : 'bg-transparent border-none text-muted hover:text-white px-1'}`}
+        className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-wider focus:outline-none cursor-pointer transition-all ${
+          isColumn 
+            ? `rounded-full px-3.5 py-1.5 min-w-[100px] justify-between shadow-md border ${chipColors.bg} ${chipColors.text} ${chipColors.border} hover:brightness-125 hover:scale-[1.02]` 
+            : 'bg-transparent border-none text-muted hover:text-white px-1'
+        }`}
       >
-        <span className="truncate max-w-[100px]">{value === 'All' ? placeholder : value}</span>
-        <ChevronDown size={10} className={`transition-transform duration-300 ${isOpen ? 'rotate-180 text-white' : ''}`} />
+        <span className="truncate max-w-[100px]">{displayVal}</span>
+        <ChevronDown size={10} className={`transition-transform duration-300 shrink-0 ${isOpen ? 'rotate-180 opacity-100' : 'opacity-60'}`} />
       </button>
       <AnimatePresence>
         {isOpen && (
@@ -190,23 +401,28 @@ const CustomSelect = ({ value, onChange, options, placeholder, isColumn = false 
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -5, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className={`absolute top-full mt-2 bg-[#0a0e16]/95 border border-white/10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-2 z-[250] scrollbar-hide backdrop-blur-xl w-max min-w-[130px] max-w-[200px] max-h-48 overflow-y-auto animate-fadeIn ${isColumn ? 'left-1/2 -translate-x-1/2' : 'left-0'}`}
+            className={`absolute top-full mt-2 bg-[#0a0e16]/95 border border-white/10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-2 z-[250] scrollbar-hide backdrop-blur-xl w-max min-w-[140px] max-w-[200px] max-h-48 overflow-y-auto left-1/2 -translate-x-1/2`}
           >
             <button
               onClick={() => { onChange('All'); setIsOpen(false); }}
-              className={`w-full text-right px-4 py-2 text-[10px] font-bold block transition-all text-muted hover:bg-white/5 hover:text-white ${value === 'All' ? 'text-primary bg-primary/5' : ''}`}
+              className={`w-full text-right px-4 py-2.5 text-[10px] font-bold block transition-all text-muted hover:bg-white/5 hover:text-white ${value === 'All' ? 'text-primary bg-primary/5 font-black border-r-2 border-primary' : ''}`}
             >
               الكل
             </button>
-            {options.map((o: string) => (
-              <button
-                key={o}
-                onClick={() => { onChange(o); setIsOpen(false); }}
-                className={`w-full text-right px-4 py-2 text-[10px] font-bold block transition-all arabic-text truncate ${value === o ? 'text-primary bg-primary/5 font-black border-r-2 border-primary' : 'text-white/80 hover:bg-white/5 hover:text-white'}`}
-              >
-                {o}
-              </button>
-            ))}
+            {options.map((o: string) => {
+              const optColors = getChipColor(o);
+              return (
+                <button
+                  key={o}
+                  onClick={() => { onChange(o); setIsOpen(false); }}
+                  className={`w-full flex items-center justify-center px-3 py-1.5 transition-all hover:bg-white/5 ${value === o ? 'bg-primary/5 border-r-2 border-primary' : ''}`}
+                >
+                  <span className={`px-3 py-1 rounded-full text-[10px] border font-black text-center inline-block max-w-[90%] truncate shadow-sm transition-all ${optColors.bg} ${optColors.text} ${optColors.border} hover:brightness-110`}>
+                    {o}
+                  </span>
+                </button>
+              );
+            })}
           </motion.div>
         )}
       </AnimatePresence>
@@ -255,15 +471,42 @@ const SidebarItem = ({ icon: Icon, label, active, onClick, colorHex, colorful }:
 
 // ─── Chip Colors ──────────────────────────────────────────────────────────────
 const getChipColor = (val: string) => {
-  if (!val) return { bg: 'bg-white/5', text: 'text-muted', border: 'border-white/5' };
+  if (!val) return { bg: 'bg-white/5', text: 'text-muted-foreground/60', border: 'border-white/5' };
   const v = val.toUpperCase();
+  
+  // Reels Branches
+  if (v.includes('DESOUK') || v.includes('دسور') || v.includes('دسوق')) 
+    return { bg: 'bg-emerald-500/10 shadow-[0_0_10px_rgba(16,185,129,0.05)]', text: 'text-emerald-400 font-extrabold', border: 'border-emerald-500/20' };
+  if (v.includes('ALEXANDRIA') || v.includes('ALEX') || v.includes('اسكندريه') || v.includes('الاسكندرية')) 
+    return { bg: 'bg-blue-500/10 shadow-[0_0_10px_rgba(59,130,246,0.05)]', text: 'text-blue-400 font-extrabold', border: 'border-blue-500/20' };
+  if (v.includes('CAIRO') || v.includes('القاهره') || v.includes('القاهرة')) 
+    return { bg: 'bg-rose-500/10 shadow-[0_0_10px_rgba(244,63,94,0.05)]', text: 'text-rose-400 font-extrabold', border: 'border-rose-500/20' };
+  if (v.includes('ONLINE') || v.includes('أونلاين') || v.includes('اونلاين')) 
+    return { bg: 'bg-purple-500/10 shadow-[0_0_10px_rgba(168,85,247,0.05)]', text: 'text-purple-400 font-extrabold', border: 'border-purple-500/20' };
+
+  // Year level colors
+  if (v.includes('M3') || v.includes('MIDDLE 3')) 
+    return { bg: 'bg-teal-500/10 shadow-[0_0_10px_rgba(20,184,166,0.05)]', text: 'text-teal-400 font-extrabold', border: 'border-teal-500/20' };
+  if (v.includes('M2') || v.includes('MIDDLE 2')) 
+    return { bg: 'bg-cyan-500/10 shadow-[0_0_10px_rgba(6,182,212,0.05)]', text: 'text-cyan-400 font-extrabold', border: 'border-cyan-500/20' };
+  if (v.includes('M1') || v.includes('MIDDLE 1')) 
+    return { bg: 'bg-sky-500/10 shadow-[0_0_10px_rgba(14,165,233,0.05)]', text: 'text-sky-400 font-extrabold', border: 'border-sky-500/20' };
+  if (v.includes('S3') || v.includes('SENIOR 3')) 
+    return { bg: 'bg-indigo-500/10 shadow-[0_0_10px_rgba(99,102,241,0.05)]', text: 'text-indigo-400 font-extrabold', border: 'border-indigo-500/20' };
+  if (v.includes('S2') || v.includes('SENIOR 2')) 
+    return { bg: 'bg-violet-500/10 shadow-[0_0_10px_rgba(139,92,246,0.05)]', text: 'text-violet-400 font-extrabold', border: 'border-violet-500/20' };
+  if (v.includes('S1') || v.includes('SENIOR 1')) 
+    return { bg: 'bg-fuchsia-500/10 shadow-[0_0_10px_rgba(217,70,239,0.05)]', text: 'text-fuchsia-400 font-extrabold', border: 'border-fuchsia-500/20' };
+
   if (v.includes('POSTPONED')) return { bg: 'bg-yellow-500/20 shadow-[0_0_15px_rgba(234,179,8,0.2)]', text: 'text-yellow-400 font-extrabold uppercase', border: 'border-yellow-500/40 animate-pulse' };
-  if (v.includes('اسكندريه') || v.includes('علوم') || v.includes('KIRO') || v.includes('COMPLETED') || v.includes('SMARTBOARD')) return { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' };
-  if (v.includes('القاهره') || v.includes('ماث') || v.includes('2025') || v.includes('BASEL') || v.includes('URGENT') || v.includes('CANCEL')) return { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' };
+  if (v.includes('علوم') || v.includes('KIRO') || v.includes('COMPLETED') || v.includes('SMARTBOARD')) return { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' };
+  if (v.includes('ماث') || v.includes('2025') || v.includes('BASEL') || v.includes('URGENT') || v.includes('CANCEL')) return { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' };
   if (v.includes('رياضه') || v.includes('PENDING') || v.includes('IN PROGRESS')) return { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' };
   if (v.includes('ساينس') || v.includes('HASSANEN') || v.includes('DONE')) return { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' };
   if (v.includes('دراسات') || v.includes('LOW')) return { bg: 'bg-orange-500/10', text: 'text-orange-400', border: 'border-orange-500/20' };
-  return { bg: 'bg-white/10', text: 'text-foreground', border: 'border-white/10' };
+  
+  // Default slate-like grey pill for other values (like employee, sohaila, etc.)
+  return { bg: 'bg-slate-500/10 border border-slate-500/20 shadow-[0_0_10px_rgba(100,116,139,0.05)]', text: 'text-slate-300 font-bold', border: 'border-slate-500/20' };
 };
 
 // ─── Chip component ───────────────────────────────────────────────────────────
@@ -316,6 +559,32 @@ const formatDuration = (val: string | number) => {
   return `${formattedHrs}${formattedMins}:${formattedSecs}`;
 };
 
+export const calculateTotalDuration = (items: any[]) => {
+  let totalSeconds = 0;
+  
+  items.forEach(item => {
+    const finalM = (item.finalMinutes && String(item.finalMinutes).trim() !== '0') ? item.finalMinutes : item.rawMinutes;
+    const durStr = String(item.exactDuration || formatDuration(finalM) || '');
+    
+    if (durStr) {
+      const parts = durStr.split(':').map(n => parseInt(n) || 0);
+      if (parts.length === 3) {
+        totalSeconds += parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        totalSeconds += parts[0] * 60 + parts[1];
+      }
+    }
+  });
+
+  if (totalSeconds === 0) return '';
+
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  
+  return `⏱️ إجمالي الوقت: ${h > 0 ? `${h}:` : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+};
+
 const VideoDuration = ({ url, fallback }: { url: string; fallback: string }) => {
   const [duration, setDuration] = useState(fallback);
 
@@ -343,7 +612,7 @@ const VideoDuration = ({ url, fallback }: { url: string; fallback: string }) => 
 const OperationsRow = ({ item, index, youtubeItems, onYoutubeToggle, isSelectedForMerge, onToggleMergeSelect, isGlowing, onOpenBunnyLinkModal }: any) => {
   const { profile } = useAuth();
   const stage = getTargetStageGid(item);
-  const itemKey = generateKey(item);
+  const itemKey = item.uniqueKey || generateKey(item);
   const isYoutubeChecked = (youtubeItems?.[stage.gid] || []).some((i: any) => 
     i.uniqueKey === ('yt-' + itemKey) || (i.mergedItemKeys && i.mergedItemKeys.includes(itemKey))
   );
@@ -454,12 +723,60 @@ const OperationsRow = ({ item, index, youtubeItems, onYoutubeToggle, isSelectedF
 };
 
 // ─── Tagme3at Row ─────────────────────────────────────────────────────────────
-const TagmeRow = ({ item, index, onUpdateEditor, editorsList, onUpdateEditorNotes, onUpdateMarketingNotes, opSheetsList, branchesList, onUpdateOpSheet, onUpdateBranch, onUpdateDate, isGlowing, liveData, canRaisePriority, priorityLimit, onStatusChange, isSubscribed, onToggleSubscribe, priorityOverride, statusOverride }: any) => {
+const TagmeRow = ({ 
+  item, 
+  index, 
+  onUpdateEditor, 
+  editorsList, 
+  onUpdateEditorNotes, 
+  onUpdateMarketingNotes, 
+  opSheetsList, 
+  branchesList, 
+  onUpdateOpSheet, 
+  onUpdateBranch, 
+  onUpdateDate, 
+  isGlowing, 
+  liveData, 
+  canRaisePriority, 
+  priorityLimit, 
+  onStatusChange, 
+  isSubscribed, 
+  onToggleSubscribe, 
+  priorityOverride, 
+  statusOverride,
+  onUpdateThumbnailLink,
+  onUpdateTime,
+  onUpdateYoutubeLink,
+  onUpdateUploaded
+}: any) => {
   const { profile } = useAuth();
   const [done, setDone] = useState(item.done);
   const [cancel, setCancel] = useState(false);
   const [priority, setPriority] = useState(item.priority);
   const [copied, setCopied] = useState(false);
+
+  const [thumbnailVal, setThumbnailVal] = useState(item.thumbnailLink || '');
+  const [isEditingThumbnail, setIsEditingThumbnail] = useState(false);
+  const [timeVal, setTimeVal] = useState(item.time || '');
+  const [youtubeVal, setYoutubeVal] = useState(item.youtubeLink || '');
+  const [isEditingYoutube, setIsEditingYoutube] = useState(false);
+  const [isUploaded, setIsUploaded] = useState(item.uploaded === true || String(item.uploaded) === 'true');
+
+  useEffect(() => {
+    setThumbnailVal(item.thumbnailLink || '');
+  }, [item.thumbnailLink]);
+
+  useEffect(() => {
+    setTimeVal(item.time || '');
+  }, [item.time]);
+
+  useEffect(() => {
+    setYoutubeVal(item.youtubeLink || '');
+  }, [item.youtubeLink]);
+
+  useEffect(() => {
+    setIsUploaded(item.uploaded === true || String(item.uploaded) === 'true');
+  }, [item.uploaded]);
 
   useEffect(() => {
     if (priorityOverride !== undefined) setPriority(priorityOverride);
@@ -520,7 +837,7 @@ const TagmeRow = ({ item, index, onUpdateEditor, editorsList, onUpdateEditorNote
             : priority 
               ? 'bg-purple-600/[0.05]' 
               : cancel 
-                ? 'bg-rose-500/[0.03]' 
+                ? 'bg-amber-500/[0.03]' 
                 : ''
       }`}
     >
@@ -539,7 +856,7 @@ const TagmeRow = ({ item, index, onUpdateEditor, editorsList, onUpdateEditorNote
                 : priority 
                 ? 'bg-purple-600 shadow-[0_0_16px_rgba(147,51,234,0.9)] animate-pulse' 
                 : cancel 
-                ? 'bg-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.6)]' 
+                ? 'bg-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.6)]' 
                 : 'bg-white/15'
             }`} />
             <div className="flex items-center gap-2">
@@ -552,14 +869,14 @@ const TagmeRow = ({ item, index, onUpdateEditor, editorsList, onUpdateEditorNote
               </button>
               <button 
                 onClick={onToggleSubscribe}
-                className={`transition-all duration-300 cursor-pointer p-0.5 ${
+                className={`transition-all duration-300 cursor-pointer p-1.5 rounded-lg border flex items-center justify-center ${
                   isSubscribed 
-                    ? 'text-rose-500 opacity-100 scale-115' 
-                    : 'text-white/20 hover:text-white/60'
+                    ? 'border-rose-500/40 bg-rose-500/10 text-rose-400 scale-105 shadow-[0_0_10px_rgba(244,63,94,0.2)]' 
+                    : 'border-white/10 bg-white/5 text-white/30 hover:border-white/30 hover:bg-white/10 hover:text-white/60'
                 }`}
                 title={isSubscribed ? 'إلغاء المتابعة' : 'متابعة هذه التجميعة'}
               >
-                <Bell size={12} />
+                <Bell size={12} className={isSubscribed ? 'animate-pulse' : ''} />
               </button>
             </div>
           </div>
@@ -633,7 +950,6 @@ const TagmeRow = ({ item, index, onUpdateEditor, editorsList, onUpdateEditorNote
             onClick={() => {
               const newDone = !done;
               setDone(newDone);
-              if (newDone) { setCancel(false); }
               const editor = item.editor;
               if (editor && editor !== 'غير محدد' && onStatusChange) {
                 onStatusChange(item.uniqueKey || generateKey(item), item.name, editor, newDone ? 'done' : 'undone');
@@ -648,16 +964,15 @@ const TagmeRow = ({ item, index, onUpdateEditor, editorsList, onUpdateEditorNote
             onClick={() => {
               const newCancel = !cancel;
               setCancel(newCancel);
-              if (newCancel) { setDone(false); }
               const editor = item.editor;
               if (editor && editor !== 'غير محدد' && onStatusChange) {
                 onStatusChange(item.uniqueKey || generateKey(item), item.name, editor, newCancel ? 'cancel' : 'uncancel');
               }
             }}
             disabled={!(profile?.role && PERMISSIONS.canEditEditors(profile.role))}
-            className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all duration-300 ${cancel ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20 scale-105' : 'bg-white/5 text-muted hover:bg-rose-500/10 hover:text-rose-400'} ${!(profile?.role && PERMISSIONS.canEditEditors(profile.role)) && 'opacity-50 cursor-not-allowed'}`}
+            className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all duration-300 ${cancel ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20 scale-105' : 'bg-white/5 text-muted hover:bg-amber-500/10 hover:text-amber-400'} ${!(profile?.role && PERMISSIONS.canEditEditors(profile.role)) && 'opacity-50 cursor-not-allowed'}`}
           >
-            <XCircle size={20} />
+            <AlertCircle size={20} />
           </button>
         </div>
       </td>
@@ -691,6 +1006,150 @@ const TagmeRow = ({ item, index, onUpdateEditor, editorsList, onUpdateEditorNote
           >
             <AlertCircle size={20} />
           </button>
+      </td>
+      <td className="px-3 py-6 text-center">
+        <div className="flex items-center justify-center gap-1.5">
+          {isEditingThumbnail ? (
+            <input 
+              autoFocus
+              type="text" 
+              value={thumbnailVal} 
+              onChange={e => setThumbnailVal(e.target.value)}
+              onBlur={() => {
+                setIsEditingThumbnail(false);
+                if (thumbnailVal !== item.thumbnailLink) {
+                  onUpdateThumbnailLink(item.uniqueKey || generateKey(item), thumbnailVal);
+                }
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
+                }
+              }}
+              className="w-full max-w-[120px] bg-white/5 border border-white/10 hover:bg-white/10 rounded-xl px-2 py-1 text-xs font-bold text-center text-white/90 outline-none transition-all focus:bg-[#0b1019] focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 text-left" 
+              placeholder="Paste link..."
+            />
+          ) : (
+            <div className="flex items-center justify-center gap-1.5">
+              {item.thumbnailLink ? (
+                (() => {
+                  const parsed = parseDriveLink(item.thumbnailLink);
+                  return (
+                    <div className="flex flex-col items-center gap-1.5">
+                      <a 
+                        href={parsed.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="px-2 py-1 rounded-lg bg-blue-500/15 text-blue-400 font-mono text-[10px] underline cursor-pointer shadow-sm truncate max-w-[110px]"
+                        title={parsed.url}
+                      >
+                        {parsed.url}
+                      </a>
+                      <div 
+                        onClick={() => parsed.url && window.open(parsed.url, '_blank')}
+                        className="relative group/preview mt-1.5 w-32 h-20 rounded-xl overflow-hidden border border-white/10 hover:border-blue-500/50 shadow-md bg-white/5 transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                        title="عرض الملف"
+                      >
+                        <PreviewImage url={item.thumbnailLink} />
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                <span className="text-muted/40 text-xs px-2 shrink-0">---</span>
+              )}
+              <button 
+                onClick={() => setIsEditingThumbnail(true)} 
+                className="p-1 rounded-full bg-white/5 hover:bg-white/15 text-muted hover:text-white transition-all scale-90 cursor-pointer shrink-0" 
+                title="تعديل الثمنيل"
+              >
+                <Pencil size={9} />
+              </button>
+            </div>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-6 text-center">
+        <input
+          type="datetime-local"
+          value={timeVal}
+          onChange={e => setTimeVal(e.target.value)}
+          onBlur={() => {
+            if (timeVal !== item.time) {
+              onUpdateTime(item.uniqueKey || generateKey(item), timeVal);
+            }
+          }}
+          style={{ colorScheme: 'dark' }}
+          className="bg-white/5 border border-white/10 hover:border-emerald-500/50 rounded-xl px-2 py-1 text-xs font-bold text-white text-center outline-none focus:bg-[#0b1019] focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/50 transition-all shadow-inner font-mono max-w-[190px]"
+        />
+      </td>
+      <td className="px-3 py-6 text-center">
+        <div className="flex items-center justify-center gap-1.5">
+          {isEditingYoutube ? (
+            <input 
+              autoFocus
+              type="text" 
+              value={youtubeVal} 
+              onChange={e => setYoutubeVal(e.target.value)}
+              onBlur={() => {
+                setIsEditingYoutube(false);
+                if (youtubeVal !== item.youtubeLink) {
+                  onUpdateYoutubeLink(item.uniqueKey || generateKey(item), youtubeVal);
+                }
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
+                }
+              }}
+              className="w-full max-w-[120px] bg-white/5 border border-white/10 hover:bg-white/10 rounded-xl px-2 py-1 text-xs font-bold text-center text-white/90 outline-none transition-all focus:bg-[#0b1019] focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 text-left" 
+              placeholder="Paste Youtube..."
+            />
+          ) : (
+            <div className="flex items-center justify-center gap-1.5">
+              {item.youtubeLink ? (
+                (() => {
+                  const parsed = parseDriveLink(item.youtubeLink);
+                  return (
+                    <a 
+                      href={parsed.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="px-2 py-1 rounded-lg bg-red-500/15 text-red-400 font-mono text-[10px] underline cursor-pointer shadow-sm truncate max-w-[110px]"
+                      title={parsed.url}
+                    >
+                      {parsed.url}
+                    </a>
+                  );
+                })()
+              ) : (
+                <span className="text-muted/40 text-xs px-2 shrink-0">---</span>
+              )}
+              <button 
+                onClick={() => setIsEditingYoutube(true)} 
+                className="p-1 rounded-full bg-white/5 hover:bg-white/15 text-muted hover:text-white transition-all scale-90 cursor-pointer shrink-0" 
+                title="تعديل رابط اليوتيوب"
+              >
+                <Pencil size={9} />
+              </button>
+            </div>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-6 text-center">
+        <button
+          onClick={() => {
+            const nextVal = !isUploaded;
+            setIsUploaded(nextVal);
+            onUpdateUploaded(item.uniqueKey || generateKey(item), nextVal);
+          }}
+          className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all duration-300 cursor-pointer ${
+            isUploaded ? 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-white/10 text-muted hover:bg-emerald-500/30 hover:text-emerald-300'
+          }`}
+          title="تم الرفع؟"
+        >
+          {isUploaded && <CheckCircle2 size={14} />}
+        </button>
       </td>
     </motion.tr>
   );
@@ -772,52 +1231,1481 @@ const StageRow = ({ item, index, tagmeTransfers, onTagmeToggle, activeLabel, isG
   );
 };
 
-// ─── Tagme3at Analytics Dashboard Component ──────────────────────────────────
-const TagmeAnalyticsDashboard = ({ liveData, tagmeTransfers, loading }: any) => {
-  const combined = useMemo(() => {
-    return [...tagmeTransfers, ...liveData];
-  }, [liveData, tagmeTransfers]);
+const AutofillCell = ({ 
+  colKey, 
+  rowIndex, 
+  value, 
+  autofillDrag, 
+  setAutofillDrag, 
+  onApply, 
+  activeCell, 
+  setActiveCell, 
+  liveDataLength = 200, 
+  className = "px-3 py-5 text-center", 
+  children 
+}: any) => {
+  const [isHovered, setIsHovered] = useState(false);
+  const [showQuickMenu, setShowQuickMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    const clickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowQuickMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', clickOutside);
+    return () => document.removeEventListener('mousedown', clickOutside);
+  }, [showQuickMenu]);
+
+  const isSelected = useMemo(() => {
+    if (!autofillDrag || autofillDrag.colKey !== colKey) return false;
+    const start = Math.min(autofillDrag.startIdx, autofillDrag.currentIdx);
+    const end = Math.max(autofillDrag.startIdx, autofillDrag.currentIdx);
+    return rowIndex >= start && rowIndex <= end;
+  }, [autofillDrag, colKey, rowIndex]);
+
+  const isActive = useMemo(() => {
+    return activeCell && activeCell.colKey === colKey && activeCell.rowIndex === rowIndex;
+  }, [activeCell, colKey, rowIndex]);
+
+  const borderClasses = useMemo(() => {
+    if (!isSelected || !autofillDrag) return null;
+    const start = Math.min(autofillDrag.startIdx, autofillDrag.currentIdx);
+    const end = Math.max(autofillDrag.startIdx, autofillDrag.currentIdx);
+    
+    const isTop = rowIndex === start;
+    const isBottom = rowIndex === end;
+    
+    let borderStyle = 'absolute border-2 border-dashed border-primary pointer-events-none z-20';
+    
+    if (start === end) {
+      return { style: `${borderStyle} -inset-[3px] rounded-lg` };
+    } else if (isTop) {
+      return { style: `${borderStyle} -left-[3px] -right-[3px] -top-[3px] border-b-0 rounded-t-lg` };
+    } else if (isBottom) {
+      return { style: `${borderStyle} -left-[3px] -right-[3px] -bottom-[3px] border-t-0 rounded-b-lg` };
+    } else {
+      return { style: `${borderStyle} -left-[3px] -right-[3px] -top-[1px] -bottom-[1px] border-t-0 border-b-0` };
+    }
+  }, [isSelected, autofillDrag, rowIndex]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAutofillDrag({
+      colKey,
+      startIdx: rowIndex,
+      currentIdx: rowIndex,
+      value
+    });
+  };
+
+  const handleMouseEnter = () => {
+    if (autofillDrag && autofillDrag.colKey === colKey) {
+      setAutofillDrag({
+        ...autofillDrag,
+        currentIdx: rowIndex
+      });
+    }
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const lastIdx = Math.max(rowIndex, liveDataLength - 1);
+    if (lastIdx > rowIndex) {
+      onApply(colKey, rowIndex, lastIdx, value);
+    }
+  };
+
+  const handleQuickFill = (rowsCount: number) => {
+    const endIdx = Math.min(rowIndex + rowsCount, liveDataLength - 1);
+    if (endIdx > rowIndex) {
+      onApply(colKey, rowIndex, endIdx, value);
+    } else {
+      onApply(colKey, rowIndex, rowIndex + rowsCount, value);
+    }
+    setShowQuickMenu(false);
+  };
+
+  const handleCellClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.closest('button')) {
+      setActiveCell({ colKey, rowIndex });
+      return;
+    }
+    setActiveCell({ colKey, rowIndex });
+  };
+
+  const showHandle = (isActive || (isHovered && value !== undefined && value !== '')) && !autofillDrag;
+
+  return (
+    <td 
+      onClick={handleCellClick}
+      className={`relative autofill-cell-td transition-all ${className} ${isSelected ? 'bg-primary/5 ring-1 ring-primary/30 z-10' : ''}`}
+      onMouseEnter={() => { setIsHovered(true); handleMouseEnter(); }}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <div className="relative w-full h-full">
+        {children}
+        
+        {isSelected && borderClasses && (
+          <div className={borderClasses.style} />
+        )}
+
+        {isSelected && autofillDrag && rowIndex === Math.max(autofillDrag.startIdx, autofillDrag.currentIdx) && (
+          <div className="absolute top-full right-1/2 translate-x-1/2 mt-1.5 bg-primary/95 text-white text-[10px] font-black px-2.5 py-1 rounded-xl shadow-[0_4px_12px_rgba(59,130,246,0.3)] border border-white/10 z-50 animate-pulse whitespace-nowrap arabic-text">
+            تعبئة: {autofillDrag.value || '---'}
+          </div>
+        )}
+
+        {isActive && !autofillDrag && (
+          <div className="absolute -inset-[3px] border-2 border-primary pointer-events-none rounded-lg z-20 shadow-[0_0_8px_rgba(59,130,246,0.2)]" />
+        )}
+        
+        {showHandle && (
+          <>
+            {!isActive && (
+              <div className="absolute -inset-[3px] border border-primary/50 pointer-events-none rounded-lg z-20" />
+            )}
+            <div 
+              onMouseDown={handleMouseDown}
+              onDoubleClick={handleDoubleClick}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setShowQuickMenu(true);
+              }}
+              className="absolute -bottom-[6px] -right-[6px] w-[10px] h-[10px] bg-primary border-2 border-white rounded-full cursor-crosshair z-30 shadow-md hover:scale-125 transition-transform animate-fadeIn"
+              title="اضغط واسحب للأسفل للتعبئة، أو اضغط مرتين للتعبئة التلقائية، أو اضغط ضغطة واحدة لخيارات التعبئة"
+            />
+          </>
+        )}
+
+        {showQuickMenu && (
+          <div 
+            ref={menuRef}
+            className="absolute right-0 bottom-full mb-2 w-52 bg-[#0a0e16]/95 border border-white/10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-2.5 z-[300] backdrop-blur-xl animate-fadeIn flex flex-col text-right arabic-text"
+          >
+            <div className="px-4 py-1.5 text-[10px] font-black text-muted uppercase tracking-wider border-b border-white/5 pb-2 mb-1">
+              خيارات التعبئة السريعة
+            </div>
+            <button
+              onClick={() => handleQuickFill(1)}
+              className="w-full px-4 py-2 text-xs font-bold text-white/90 hover:bg-white/5 transition-all text-right"
+            >
+              نسخ للخلية التالية (1 صف)
+            </button>
+            <button
+              onClick={() => handleQuickFill(5)}
+              className="w-full px-4 py-2 text-xs font-bold text-white/90 hover:bg-white/5 transition-all text-right"
+            >
+              تعبئة 5 صفوف تالية
+            </button>
+            <button
+              onClick={() => handleQuickFill(10)}
+              className="w-full px-4 py-2 text-xs font-bold text-white/90 hover:bg-white/5 transition-all text-right"
+            >
+              تعبئة 10 صفوف تالية
+            </button>
+            {liveDataLength - 1 - rowIndex > 0 && (
+              <button
+                onClick={() => handleQuickFill(liveDataLength - 1 - rowIndex)}
+                className="w-full px-4 py-2 text-xs font-bold text-primary hover:bg-primary/10 transition-all text-right border-t border-white/5 mt-1 pt-2"
+              >
+                تعبئة لنهاية الجدول ({liveDataLength - 1 - rowIndex} صف)
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </td>
+  );
+};
+
+// ─── REELS Row (Shooting, Ve, Counter) ────────────────────────────────────────
+const ShootingRow = ({ item, index, activeGid, onToggleFilmed, loadingFilmedCode, onUpdateShootingRow, liveData, optionsLists, autofillDrag, setAutofillDrag, onApplyAutofill, activeCell, setActiveCell, toast, isSubscribed, onToggleSubscribe }: any) => {
+  const isGlowing = false;
+  const [editForm, setEditForm] = useState({
+    branch: item.branch || '',
+    year: item.year || '',
+    teacher: item.teacher || '',
+    extraName: item.extraName || '',
+    type: item.type || '',
+    format: item.format || '',
+    by: item.by || '',
+    storage: item.storage || '',
+    script: item.script || '',
+    notes: item.notes || '',
+    driveRaw: item.driveRaw || '',
+    editorCol: item.editorCol || '',
+    driveFinal: item.driveFinal || ''
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [isEditingScript, setIsEditingScript] = useState(false);
+  const [isEditingRaw, setIsEditingRaw] = useState(false);
+  const [isEditingFinal, setIsEditingFinal] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const { profile } = useAuth();
+
+  const parseScriptValue = (val: string) => {
+    if (!val) return null;
+    const s = String(val).trim();
+    
+    // 1. Check if it is a hyperlink formula (highly resilient to spacing and quotes)
+    const hyperlinkRegex = /=HYPERLINK\s*\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)/i;
+    const formulaMatch = s.match(hyperlinkRegex);
+    if (formulaMatch) {
+      return {
+        url: formulaMatch[2].trim(),
+        text: formulaMatch[4].trim(),
+        isLink: true
+      };
+    }
+    
+    // 2. Check if it contains a google docs/drive URL or is a raw Google Doc path
+    if (s.includes('document/d/') || s.includes('spreadsheets/d/') || s.includes('drive.google.com') || s.includes('docs.google.com') || s.startsWith('http://') || s.startsWith('https://')) {
+      let url = s;
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        if (url.startsWith('docs.google.com') || url.startsWith('drive.google.com')) {
+          url = 'https://' + url;
+        } else if (url.includes('document/d/')) {
+          const idx = url.indexOf('document/d/');
+          url = 'https://docs.google.com/' + url.substring(idx);
+        } else {
+          url = 'https://' + url;
+        }
+      }
+      
+      // Clean display text to preserve document ID path, but omit domain to keep chips beautifully compact
+      let text = s;
+      if (text.startsWith('https://')) text = text.substring(8);
+      if (text.startsWith('http://')) text = text.substring(7);
+      if (text.startsWith('www.')) text = text.substring(4);
+      if (text.startsWith('docs.google.com/')) text = text.substring(16);
+      
+      // Limit length to keep the chip layout beautiful and prevent wrapping
+      if (text.length > 32) {
+        text = text.substring(0, 30) + '...';
+      }
+      
+      return {
+        url,
+        text: text,
+        isLink: true
+      };
+    }
+    
+    // 3. Default raw text
+    return {
+      url: null,
+      text: s,
+      isLink: false
+    };
+  };
+
+
+
+  // Sync editForm if item changes from outside (e.g. after save)
+  useEffect(() => {
+    setEditForm({
+      branch: item.branch || '',
+      year: item.year || '',
+      teacher: item.teacher || '',
+      extraName: item.extraName || '',
+      type: item.type || '',
+      format: item.format || '',
+      by: item.by || '',
+      storage: item.storage || '',
+      script: item.script || '',
+      notes: item.notes || '',
+      driveRaw: item.driveRaw || '',
+      editorCol: item.editorCol || '',
+      driveFinal: item.driveFinal || ''
+    });
+  }, [item]);
+
+  const generatedCode = useMemo(() => {
+    if (!['1436746012', '1939073164', '798246690'].includes(activeGid)) return item.id;
+    const prefix = `${editForm.year}-${editForm.teacher}-${editForm.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
+    const currentPrefix = `${item.year}-${item.teacher}-${item.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
+    if (prefix === currentPrefix) return item.id;
+
+    const currentSheetData = Array.isArray(liveData) ? liveData : [];
+    let maxSeq = -1;
+    currentSheetData.forEach((row: any) => {
+      if (row.id && row.id.toLowerCase().startsWith(prefix) && row.id !== item.id) {
+        const parts = row.id.split('-');
+        if (parts.length >= 4) {
+          const seqStr = parts[3].split(' ')[0];
+          const seq = parseInt(seqStr, 10);
+          if (!isNaN(seq) && seq > maxSeq) {
+            maxSeq = seq;
+          }
+        }
+      }
+    });
+    const nextSeq = maxSeq + 1;
+    return `${prefix}${nextSeq.toString().padStart(2, '0')} v6`.toLowerCase();
+  }, [editForm, item, liveData, activeGid]);
+
+  const handleFieldChange = async (fieldName: string, value: string) => {
+    // 1. Update the state immediately for fast feedback
+    const updatedForm = { ...editForm, [fieldName]: value };
+    setEditForm(updatedForm);
+
+    // 2. Generate new code if year, teacher, or extraName changes
+    let newCode = item.id;
+    if (['1436746012', '1939073164', '798246690'].includes(activeGid) && (fieldName === 'year' || fieldName === 'teacher' || fieldName === 'extraName')) {
+      const prefix = `${updatedForm.year}-${updatedForm.teacher}-${updatedForm.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
+      const currentPrefix = `${item.year}-${item.teacher}-${item.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
+      if (prefix !== currentPrefix) {
+        const currentSheetData = Array.isArray(liveData) ? liveData : [];
+        let maxSeq = -1;
+        currentSheetData.forEach((row: any) => {
+          if (row.id && row.id.toLowerCase().startsWith(prefix) && row.id !== item.id) {
+            const parts = row.id.split('-');
+            if (parts.length >= 4) {
+              const seqStr = parts[3].split(' ')[0];
+              const seq = parseInt(seqStr, 10);
+              if (!isNaN(seq) && seq > maxSeq) {
+                maxSeq = seq;
+              }
+            }
+          }
+        });
+        const nextSeq = maxSeq + 1;
+        newCode = `${prefix}${nextSeq.toString().padStart(2, '0')} v6`.toLowerCase();
+      }
+    }
+
+    // Done status logic: if fieldName is 'driveFinal' and the value is empty/invalid,
+    // we automatically uncheck done for everyone!
+    let nextDoneStatus = item.done;
+    if (fieldName === 'driveFinal' && item.done) {
+      const val = String(value || '').trim();
+      const driveIdRegex = /^[a-zA-Z0-9_-]{25,55}$/;
+      const isValidLink = val && (val.toLowerCase() === 'تم' || val.includes('http://') || val.includes('https://') || val.includes('drive.google.com') || val.includes('docs.google.com') || driveIdRegex.test(val));
+      if (!isValidLink) {
+        nextDoneStatus = false;
+      }
+    }
+
+    // 3. Call the update api with the final values
+    if (!onUpdateShootingRow) return;
+    setIsSaving(true);
+    const rowData = [
+      item.date,
+      updatedForm.branch,
+      updatedForm.year,
+      updatedForm.teacher,
+      updatedForm.extraName,
+      newCode,
+      updatedForm.script,
+      updatedForm.type,
+      updatedForm.format,
+      item.filmed ? 'TRUE' : 'FALSE',
+      item.filmingDate,
+      updatedForm.by,
+      updatedForm.storage,
+      updatedForm.notes,
+      updatedForm.driveRaw,
+      updatedForm.editorCol,
+      nextDoneStatus ? 'TRUE' : 'FALSE',
+      updatedForm.driveFinal,
+      item.canceled ? 'TRUE' : 'FALSE',
+      item.missingDetails ? 'TRUE' : 'FALSE'
+    ];
+    try {
+      await onUpdateShootingRow(item.id, rowData);
+    } catch(e) {
+      console.error(e);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const inputStyle = "w-full bg-white/5 border border-white/10 hover:bg-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-center text-white/90 outline-none transition-all focus:bg-[#0b1019] focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30";
+
+  const isCanceled = item.canceled === true || item.canceled === 'TRUE';
+  const isMissing = item.missingDetails === true || item.missingDetails === 'TRUE';
+  const isDone = item.done === true || item.done === 'TRUE';
+
+  return (
+    <motion.tr
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.01 }}
+      className={`transition-all duration-300 border-b border-white/[0.03] row-hover ${
+        isCanceled 
+          ? 'bg-rose-500/[0.06] hover:bg-rose-500/[0.12] border-rose-500/20 text-rose-100/90' 
+          : isMissing 
+            ? 'bg-amber-500/[0.06] hover:bg-amber-500/[0.12] border-amber-500/20 text-amber-100/90' 
+            : isDone 
+              ? 'bg-emerald-500/[0.06] hover:bg-emerald-500/[0.12] border-emerald-500/20 text-emerald-100/90' 
+              : ''
+      } ${isGlowing ? 'bg-emerald-500/20 shadow-[inset_0_0_25px_rgba(16,185,129,0.4)] ring-2 ring-emerald-500/50 border-emerald-500/50 animate-pulse relative z-10' : ''}`}
+    >
+      <td className="px-4 py-5 text-center"><span className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs font-mono font-bold text-blue-400 shrink-0">{item.date || '---'}</span></td>
+      
+      <AutofillCell colKey="branch" rowIndex={index} value={editForm.branch} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.branches} value={editForm.branch} onChange={(val: string) => handleFieldChange('branch', val)} />
+      </AutofillCell>
+
+      <AutofillCell colKey="year" rowIndex={index} value={editForm.year} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.years} value={editForm.year} onChange={(val: string) => handleFieldChange('year', val)} />
+      </AutofillCell>
+
+      <AutofillCell colKey="teacher" rowIndex={index} value={editForm.teacher} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.teachers} value={editForm.teacher} onChange={(val: string) => handleFieldChange('teacher', val)} />
+      </AutofillCell>
+
+      <AutofillCell colKey="extraName" rowIndex={index} value={editForm.extraName} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.extraNames} value={editForm.extraName} onChange={(val: string) => handleFieldChange('extraName', val)} />
+      </AutofillCell>
+
+      <td className="px-3 py-5 text-center">
+        <div className="flex items-center justify-center gap-2">
+          <div 
+            onClick={() => {
+              navigator.clipboard.writeText(generatedCode);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/10 hover:border-emerald-500/30 transition-all duration-200 cursor-pointer shadow-sm text-xs font-mono font-bold text-emerald-400 hover:scale-[1.02] active:scale-95 group whitespace-nowrap"
+            title="اضغط لنسخ الكود"
+          >
+            <span className="tracking-wide">{generatedCode}</span>
+            {copied ? (
+              <Check size={12} className="text-emerald-400 shrink-0 animate-fadeIn" />
+            ) : (
+              <Copy size={12} className="text-emerald-500/40 group-hover:text-emerald-400 transition-colors shrink-0" />
+            )}
+          </div>
+          <button 
+            onClick={() => onToggleSubscribe(generatedCode)}
+            className={`transition-all duration-300 cursor-pointer p-2 rounded-xl border flex items-center justify-center ${
+              isSubscribed 
+                ? 'border-rose-500/40 bg-rose-500/10 text-rose-400 scale-105 shadow-[0_0_10px_rgba(244,63,94,0.2)]' 
+                : 'border-white/10 bg-white/5 text-white/30 hover:border-white/30 hover:bg-white/10 hover:text-white/60'
+            }`}
+            title={isSubscribed ? 'إلغاء المتابعة' : 'متابعة هذا السكريبت'}
+          >
+            <Bell size={12} className={isSubscribed ? 'animate-pulse' : ''} />
+          </button>
+        </div>
+      </td>
+
+      <AutofillCell colKey="script" rowIndex={index} value={editForm.script} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length} className="px-4 py-5 text-right font-bold arabic-text">
+        {isEditingScript ? (
+          <input 
+            autoFocus
+            type="text" 
+            value={editForm.script} 
+            onChange={e => setEditForm({...editForm, script: e.target.value})}
+            onBlur={() => {
+              setIsEditingScript(false);
+              if (editForm.script !== item.script) {
+                handleFieldChange('script', editForm.script);
+              }
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.currentTarget.blur();
+              }
+            }}
+            className={inputStyle + " min-w-[150px] text-left"} 
+            placeholder="Paste Drive Link..."
+          />
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            {(() => {
+              const parsed = parseScriptValue(item.script);
+              if (!parsed) return <span className="text-muted/40 text-xs px-2 shrink-0">---</span>;
+              
+              if (parsed.isLink) {
+                return (
+                  <a 
+                    href={parsed.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-xl text-[11px] font-extrabold transition-all text-blue-400 shadow-sm shrink-0 hover:scale-[1.02] active:scale-95 cursor-pointer"
+                  >
+                    <FolderOpen size={12} className="shrink-0 text-blue-400" />
+                    <span className="truncate max-w-[130px] arabic-text" title={parsed.url}>{parsed.text}</span>
+                  </a>
+                );
+              } else {
+                return (
+                  <span className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl text-[11px] font-bold text-white/90 shadow-sm shrink-0">
+                    <span className="truncate max-w-[130px] arabic-text" title={parsed.text}>{parsed.text}</span>
+                  </span>
+                );
+              }
+            })()}
+            <button 
+              onClick={() => setIsEditingScript(true)} 
+              className="p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-muted hover:text-white transition-all scale-95 cursor-pointer shrink-0" 
+              title="تعديل الاسكريبت"
+            >
+              <Pencil size={11} />
+            </button>
+          </div>
+        )}
+      </AutofillCell>
+      <AutofillCell colKey="type" rowIndex={index} value={editForm.type} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.types} value={editForm.type} onChange={(val: string) => handleFieldChange('type', val)} />
+      </AutofillCell>
+      <AutofillCell colKey="format" rowIndex={index} value={editForm.format} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.formats} value={editForm.format} onChange={(val: string) => handleFieldChange('format', val)} />
+      </AutofillCell>
+      <td className="px-3 py-5 text-center">
+        <button
+          onClick={() => {
+            if (activeGid === '1939073164') return;
+            onToggleFilmed && onToggleFilmed(item, !item.filmed);
+          }}
+          className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all duration-300 ${activeGid === '1939073164' ? 'cursor-default' : 'cursor-pointer'} ${loadingFilmedCode === item.id && activeGid !== '1939073164' ? 'opacity-50 pointer-events-none' : ''} ${
+            (item.filmed || activeGid === '1939073164') ? 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-white/10 text-muted hover:bg-emerald-500/30 hover:text-emerald-300'
+          }`}
+        >
+          {loadingFilmedCode === item.id && activeGid !== '1939073164' ? (
+            <span className="w-3 h-3 border-2 border-white/50 border-t-white rounded-full animate-spin"></span>
+          ) : (item.filmed || activeGid === '1939073164') ? (
+            <CheckCircle2 size={14} />
+          ) : null}
+        </button>
+      </td>
+      <td className="px-4 py-5 text-center text-xs text-muted">{item.filmingDate || '---'}</td>
+      <AutofillCell colKey="by" rowIndex={index} value={editForm.by} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.bys} value={editForm.by} onChange={(val: string) => handleFieldChange('by', val)} />
+      </AutofillCell>
+      <AutofillCell colKey="storage" rowIndex={index} value={editForm.storage} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.storages} value={editForm.storage} onChange={(val: string) => handleFieldChange('storage', val)} />
+      </AutofillCell>
+      <AutofillCell colKey="notes" rowIndex={index} value={editForm.notes} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length} className="px-5 py-5 text-center text-xs font-bold text-white/90 arabic-text">
+        <HistoryInput
+          itemKey={item.id}
+          fieldKey="shooting_notes"
+          value={editForm.notes}
+          onChange={(val: string) => handleFieldChange('notes', val)}
+          placeholder="اكتب ملاحظة..."
+          disabled={false}
+        />
+      </AutofillCell>
+      <td className="px-4 py-5 text-center">
+        <div className="flex flex-col gap-2 items-center justify-center">
+          {isEditingRaw ? (
+            <input 
+              autoFocus
+              type="text" 
+              value={editForm.driveRaw} 
+              onChange={e => setEditForm({...editForm, driveRaw: e.target.value})}
+              onBlur={() => {
+                setIsEditingRaw(false);
+                if (editForm.driveRaw !== item.driveRaw) {
+                  handleFieldChange('driveRaw', editForm.driveRaw);
+                }
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
+                }
+              }}
+              className="w-full max-w-[150px] bg-white/5 border border-white/10 hover:bg-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-center text-white/90 outline-none transition-all focus:bg-[#0b1019] focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 text-left" 
+              placeholder="Paste Raw Drive Link..."
+            />
+          ) : (
+            <div className="flex items-center justify-center gap-1.5">
+              {item.driveRaw ? (
+                (() => {
+                  const parsed = parseDriveLink(item.driveRaw);
+                  return (
+                    <a 
+                      href={parsed.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 font-mono text-[11px] underline cursor-pointer shadow-sm shrink-0 truncate max-w-[220px]"
+                      title={parsed.url}
+                    >
+                      {parsed.url}
+                    </a>
+                  );
+                })()
+              ) : (
+                <span className="text-muted/40 text-xs px-2 shrink-0">---</span>
+              )}
+              <button 
+                onClick={() => setIsEditingRaw(true)} 
+                className="p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-muted hover:text-white transition-all scale-95 cursor-pointer shrink-0" 
+                title="تعديل لينك الدرايف"
+              >
+                <Pencil size={11} />
+              </button>
+            </div>
+          )}
+          {isSaving && (
+            <span className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin block" title="جاري الحفظ تلقائياً..." />
+          )}
+        </div>
+      </td>
+      {activeGid === '1939073164' && (
+        <>
+          <AutofillCell colKey="editorCol" rowIndex={index} value={editForm.editorCol} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+            <InlineCombobox options={optionsLists?.editors} value={editForm.editorCol} onChange={(val: string) => handleFieldChange('editorCol', val)} />
+          </AutofillCell>
+          {/* Missing Details Checkmark */}
+          <td className="px-3 py-5 text-center">
+            <button
+              onClick={async () => {
+                if (!item.id) { alert("لا يمكن تعديل هذا الصف لعدم وجود كود (Code)"); return; }
+                if (!onUpdateShootingRow) return;
+                setIsSaving(true);
+                const nextMissing = !isMissing;
+                const rowData = [
+                  item.date,
+                  editForm.branch,
+                  editForm.year,
+                  editForm.teacher,
+                  editForm.extraName,
+                  item.id,
+                  editForm.script,
+                  editForm.type,
+                  editForm.format,
+                  item.filmed ? 'TRUE' : 'FALSE',
+                  item.filmingDate,
+                  editForm.by,
+                  editForm.storage,
+                  editForm.notes,
+                  editForm.driveRaw,
+                  editForm.editorCol,
+                  item.done ? 'TRUE' : 'FALSE',
+                  editForm.driveFinal,
+                  item.canceled ? 'TRUE' : 'FALSE',
+                  nextMissing ? 'TRUE' : 'FALSE'
+                ];
+                try {
+                  await onUpdateShootingRow(item.id, rowData);
+                } catch(e) {
+                  console.error(e);
+                } finally {
+                  setIsSaving(false);
+                }
+              }}
+              className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all duration-300 cursor-pointer ${
+                isMissing ? 'bg-amber-500 text-white shadow-[0_0_10px_rgba(245,158,11,0.5)]' : 'bg-white/10 text-muted hover:bg-amber-500/30 hover:text-amber-300'
+              }`}
+              title="تفاصيل ناقصة"
+            >
+              {isMissing && <CheckCircle2 size={14} />}
+            </button>
+          </td>
+          {/* DONE Checkmark */}
+          <td className="px-3 py-5 text-center">
+            <button
+              onClick={async () => {
+                if (!item.id) { alert("لا يمكن تعديل هذا الصف لعدم وجود كود (Code)"); return; }
+                const nextDone = !isDone;
+                if (nextDone) {
+                  const finalVal = String(editForm.driveFinal || '').trim();
+                  const driveIdRegex = /^[a-zA-Z0-9_-]{25,55}$/;
+                  if (!finalVal || (finalVal.toLowerCase() !== 'تم' && !finalVal.includes('http://') && !finalVal.includes('https://') && !finalVal.includes('drive.google.com') && !finalVal.includes('docs.google.com') && !driveIdRegex.test(finalVal))) {
+                    if (toast && toast.error) {
+                      toast.error("لا يمكن تحديد المهمة كمكتملة (Done) إلا بعد إضافة رابط المونتاج النهائي (Final Link) أو كتابة 'تم'");
+                    } else {
+                      alert("لا يمكن تحديد المهمة كمكتملة (Done) إلا بعد إضافة رابط المونتاج النهائي (Final Link) أو كتابة 'تم'");
+                    }
+                    return;
+                  }
+                }
+                if (!onUpdateShootingRow) return;
+                setIsSaving(true);
+                const rowData = [
+                  item.date,
+                  editForm.branch,
+                  editForm.year,
+                  editForm.teacher,
+                  editForm.extraName,
+                  item.id,
+                  editForm.script,
+                  editForm.type,
+                  editForm.format,
+                  item.filmed ? 'TRUE' : 'FALSE',
+                  item.filmingDate,
+                  editForm.by,
+                  editForm.storage,
+                  editForm.notes,
+                  editForm.driveRaw,
+                  editForm.editorCol,
+                  nextDone ? 'TRUE' : 'FALSE',
+                  editForm.driveFinal,
+                  item.canceled ? 'TRUE' : 'FALSE',
+                  item.missingDetails ? 'TRUE' : 'FALSE'
+                ];
+                try {
+                  await onUpdateShootingRow(item.id, rowData);
+                } catch(e) {
+                  console.error(e);
+                } finally {
+                  setIsSaving(false);
+                }
+              }}
+              className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all duration-300 cursor-pointer ${
+                isDone ? 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-white/10 text-muted hover:bg-emerald-500/30 hover:text-emerald-300'
+              }`}
+              title="تم الإنجاز"
+            >
+              {isDone && <CheckCircle2 size={14} />}
+            </button>
+          </td>
+          {/* Cancel Checkmark */}
+          <td className="px-3 py-5 text-center">
+            <button
+              onClick={async () => {
+                if (!item.id) { alert("لا يمكن تعديل هذا الصف لعدم وجود كود (Code)"); return; }
+                if (!onUpdateShootingRow) return;
+                setIsSaving(true);
+                const nextCanceled = !isCanceled;
+                const rowData = [
+                  item.date,
+                  editForm.branch,
+                  editForm.year,
+                  editForm.teacher,
+                  editForm.extraName,
+                  item.id,
+                  editForm.script,
+                  editForm.type,
+                  editForm.format,
+                  item.filmed ? 'TRUE' : 'FALSE',
+                  item.filmingDate,
+                  editForm.by,
+                  editForm.storage,
+                  editForm.notes,
+                  editForm.driveRaw,
+                  editForm.editorCol,
+                  item.done ? 'TRUE' : 'FALSE',
+                  editForm.driveFinal,
+                  nextCanceled ? 'TRUE' : 'FALSE',
+                  item.missingDetails ? 'TRUE' : 'FALSE'
+                ];
+                try {
+                  await onUpdateShootingRow(item.id, rowData);
+                } catch(e) {
+                  console.error(e);
+                } finally {
+                  setIsSaving(false);
+                }
+              }}
+              className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all duration-300 cursor-pointer ${
+                isCanceled 
+                  ? activeGid === '798246690' 
+                    ? 'bg-amber-500 text-white shadow-[0_0_10px_rgba(245,158,11,0.5)]' 
+                    : 'bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.5)]'
+                  : activeGid === '798246690'
+                    ? 'bg-white/10 text-muted hover:bg-amber-500/30 hover:text-amber-300'
+                    : 'bg-white/10 text-muted hover:bg-rose-500/30 hover:text-rose-300'
+              }`}
+              title={activeGid === '798246690' ? "مشكلة" : "ملغي"}
+            >
+              {isCanceled && (activeGid === '798246690' ? <AlertCircle size={14} /> : <XCircle size={14} />)}
+            </button>
+          </td>
+        </>
+      )}
+      <td className="px-4 py-5 text-center">
+        <div className="flex flex-col gap-2 items-center justify-center">
+          {isEditingFinal ? (
+            <input 
+              autoFocus
+              type="text" 
+              value={editForm.driveFinal} 
+              onChange={e => setEditForm({...editForm, driveFinal: e.target.value})}
+              onBlur={() => {
+                setIsEditingFinal(false);
+                if (editForm.driveFinal !== item.driveFinal) {
+                  handleFieldChange('driveFinal', editForm.driveFinal);
+                }
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
+                }
+              }}
+              className="w-full max-w-[150px] bg-white/5 border border-white/10 hover:bg-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-center text-white/90 outline-none transition-all focus:bg-[#0b1019] focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 text-left" 
+              placeholder="Paste Final Drive Link..."
+            />
+          ) : (
+            <div className="flex items-center justify-center gap-1.5">
+              {item.driveFinal ? (
+                (() => {
+                  const parsed = parseDriveLink(item.driveFinal);
+                  return (
+                    <a 
+                      href={parsed.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 font-mono text-[11px] underline cursor-pointer shadow-sm shrink-0 truncate max-w-[220px]"
+                      title={parsed.url}
+                    >
+                      {parsed.url}
+                    </a>
+                  );
+                })()
+              ) : (
+                <span className="text-muted/40 text-xs px-2 shrink-0">---</span>
+              )}
+              <button 
+                onClick={() => setIsEditingFinal(true)} 
+                className="p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-muted hover:text-white transition-all scale-95 cursor-pointer shrink-0" 
+                title="تعديل لينك فاينال"
+              >
+                <Pencil size={11} />
+              </button>
+            </div>
+          )}
+        </div>
+      </td>
+    </motion.tr>
+  );
+};
+
+// ─── CUTS Row ───────────────────────────────────────────────────────────────
+const CutsRow = ({ 
+  item, 
+  index, 
+  onUpdateShootingRow, 
+  liveData, 
+  optionsLists, 
+  autofillDrag, 
+  setAutofillDrag, 
+  onApplyAutofill, 
+  activeCell, 
+  setActiveCell,
+  toast,
+  isSubscribed,
+  onToggleSubscribe
+}: any) => {
+  const [editForm, setEditForm] = useState({
+    branch: item.branch || '',
+    year: item.year || '',
+    creator: item.creator || '',
+    type: item.type || '',
+    format: item.format || '',
+    dataFiles: item.dataFiles || '',
+    script: item.script || '',
+    creatorNotes: item.creatorNotes || '',
+    editorNotes: item.editorNotes || '',
+    editor: item.editor || '',
+    driveFinal: item.driveFinal || ''
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [isEditingDataFiles, setIsEditingDataFiles] = useState(false);
+  const [isEditingScript, setIsEditingScript] = useState(false);
+  const [isEditingFinal, setIsEditingFinal] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const { profile } = useAuth();
+
+  const parseCutsLink = (val: string, fallbackText: string) => {
+    if (!val) return null;
+    let s = String(val).trim();
+    
+    // Hyperlink formula
+    const hyperlinkRegex = /=HYPERLINK\s*\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)/i;
+    const formulaMatch = s.match(hyperlinkRegex);
+    if (formulaMatch) {
+      let url = formulaMatch[2].trim();
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+      }
+      return {
+        url,
+        text: formulaMatch[4].trim(),
+        isLink: true
+      };
+    }
+    
+    let url = s;
+    const driveIdRegex = /^[a-zA-Z0-9_-]{25,55}$/;
+    
+    if (url.includes('drive.google.com') || url.includes('docs.google.com') || url.includes('spreadsheets/d/') || url.includes('document/d/') || url.includes('file/d/')) {
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        if (url.startsWith('drive.google.com') || url.startsWith('docs.google.com')) {
+          url = 'https://' + url;
+        } else if (url.startsWith('www.drive.google.com') || url.startsWith('www.docs.google.com')) {
+          url = 'https://' + url;
+        } else {
+          if (url.startsWith('/')) url = url.substring(1);
+          if (url.startsWith('file/d/')) {
+            url = 'https://drive.google.com/' + url;
+          } else if (url.startsWith('d/')) {
+            url = 'https://drive.google.com/file/' + url;
+          } else {
+            url = 'https://' + url;
+          }
+        }
+      }
+      return {
+        url,
+        text: fallbackText,
+        isLink: true
+      };
+    } else if (driveIdRegex.test(url)) {
+      url = `https://drive.google.com/file/d/${url}/view?usp=sharing`;
+      return {
+        url,
+        text: fallbackText,
+        isLink: true
+      };
+    } else if (!url.startsWith('http://') && !url.startsWith('https://') && url.includes('.')) {
+      url = 'https://' + url;
+      return {
+        url,
+        text: fallbackText,
+        isLink: true
+      };
+    }
+    
+    // Plain text
+    return {
+      url: null,
+      text: s,
+      isLink: false
+    };
+  };
+
+  useEffect(() => {
+    setEditForm({
+      branch: item.branch || '',
+      year: item.year || '',
+      creator: item.creator || '',
+      type: item.type || '',
+      format: item.format || '',
+      dataFiles: item.dataFiles || '',
+      script: item.script || '',
+      creatorNotes: item.creatorNotes || '',
+      editorNotes: item.editorNotes || '',
+      editor: item.editor || '',
+      driveFinal: item.driveFinal || ''
+    });
+  }, [item]);
+
+  const handleFieldChange = async (fieldName: string, value: string) => {
+    const updatedForm = { ...editForm, [fieldName]: value };
+    setEditForm(updatedForm);
+
+    if (!onUpdateShootingRow) return;
+    setIsSaving(true);
+
+    let targetCode = item.id;
+    if (fieldName === 'year' || fieldName === 'creator') {
+      const parts = String(item.id).split('-');
+      if (parts.length >= 4) {
+        const currentYear = fieldName === 'year' ? value : updatedForm.year;
+        const currentCreator = fieldName === 'creator' ? value : updatedForm.creator;
+        const sequencePart = parts[3]; // e.g. "03 v6" or "00 v6"
+        targetCode = `${currentYear}-cut-${currentCreator}-${sequencePart}`.toLowerCase().replace(/\s+/g, ' ');
+      }
+    }
+
+    // Done status logic: if fieldName is 'driveFinal' and the value is empty/invalid,
+    // we automatically uncheck done for everyone!
+    let nextDoneStatus = item.done;
+    if (fieldName === 'driveFinal' && item.done) {
+      const val = String(value || '').trim();
+      const driveIdRegex = /^[a-zA-Z0-9_-]{25,55}$/;
+      const isValidLink = val && (val.toLowerCase() === 'تم' || val.includes('http://') || val.includes('https://') || val.includes('drive.google.com') || val.includes('docs.google.com') || driveIdRegex.test(val));
+      if (!isValidLink) {
+        nextDoneStatus = false;
+      }
+    }
+
+    const rowData = [
+      item.date,
+      updatedForm.branch,
+      updatedForm.year,
+      item.typeCol, // static
+      updatedForm.creator,
+      targetCode,   // dynamically updated code!
+      updatedForm.dataFiles,
+      updatedForm.script,
+      updatedForm.type,
+      updatedForm.format,
+      updatedForm.creatorNotes,
+      updatedForm.editorNotes,
+      item.missingDetails ? 'TRUE' : 'FALSE',
+      item.problem ? 'TRUE' : 'FALSE',
+      nextDoneStatus ? 'TRUE' : 'FALSE',
+      updatedForm.editor,
+      updatedForm.driveFinal,
+      item.canceled ? 'TRUE' : 'FALSE'
+    ];
+    try {
+      await onUpdateShootingRow(item.id, rowData);
+    } catch(e) {
+      console.error(e);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const toggleStatus = async (fieldName: string, currentVal: boolean) => {
+    if (!item.id) { alert("لا يمكن تعديل هذا الصف لعدم وجود كود (Code)"); return; }
+    if (!onUpdateShootingRow) return;
+    setIsSaving(true);
+    const newVal = !currentVal;
+
+    // Done status validation
+    if (fieldName === 'done' && newVal) {
+      const finalVal = String(editForm.driveFinal || '').trim();
+      const driveIdRegex = /^[a-zA-Z0-9_-]{25,55}$/;
+      if (!finalVal || (finalVal.toLowerCase() !== 'تم' && !finalVal.includes('http://') && !finalVal.includes('https://') && !finalVal.includes('drive.google.com') && !finalVal.includes('docs.google.com') && !driveIdRegex.test(finalVal))) {
+        if (toast && toast.error) {
+          toast.error("لا يمكن تحديد المهمة كمكتملة (Done) إلا بعد إضافة رابط المونتاج النهائي (Final Link) أو كتابة 'تم'");
+        } else {
+          alert("لا يمكن تحديد المهمة كمكتملة (Done) إلا بعد إضافة رابط المونتاج النهائي (Final Link) أو كتابة 'تم'");
+        }
+        setIsSaving(false);
+        return;
+      }
+    }
+    
+    const rowData = [
+      item.date,
+      editForm.branch,
+      editForm.year,
+      item.typeCol,
+      editForm.creator,
+      item.id,
+      editForm.dataFiles,
+      editForm.script,
+      editForm.type,
+      editForm.format,
+      editForm.creatorNotes,
+      editForm.editorNotes,
+      fieldName === 'missingDetails' ? (newVal ? 'TRUE' : 'FALSE') : (item.missingDetails ? 'TRUE' : 'FALSE'),
+      fieldName === 'problem' ? (newVal ? 'TRUE' : 'FALSE') : (item.problem ? 'TRUE' : 'FALSE'),
+      fieldName === 'done' ? (newVal ? 'TRUE' : 'FALSE') : (item.done ? 'TRUE' : 'FALSE'),
+      editForm.editor,
+      editForm.driveFinal,
+      fieldName === 'canceled' ? (newVal ? 'TRUE' : 'FALSE') : (item.canceled ? 'TRUE' : 'FALSE')
+    ];
+    
+    try {
+      await onUpdateShootingRow(item.id, rowData);
+    } catch(e) {
+      console.error(e);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const inputStyle = "w-full bg-white/5 border border-white/10 hover:bg-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-center text-white/90 outline-none transition-all focus:bg-[#0b1019] focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30";
+
+  const isCanceled = item.canceled === true || item.canceled === 'TRUE';
+  const isProblem = item.problem === true || item.problem === 'TRUE';
+  const isMissing = item.missingDetails === true || item.missingDetails === 'TRUE';
+  const isDone = item.done === true || item.done === 'TRUE';
+
+  return (
+    <motion.tr
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.01 }}
+      className={`transition-all duration-300 border-b border-white/[0.03] row-hover ${
+        isCanceled || isProblem
+          ? 'bg-rose-500/[0.06] hover:bg-rose-500/[0.12] border-rose-500/20 text-rose-100/90' 
+          : isMissing 
+            ? 'bg-amber-500/[0.06] hover:bg-amber-500/[0.12] border-amber-500/20 text-amber-100/90' 
+            : isDone 
+              ? 'bg-emerald-500/[0.06] hover:bg-emerald-500/[0.12] border-emerald-500/20 text-emerald-100/90' 
+              : ''
+      }`}
+    >
+      <td className="px-4 py-5 text-center"><span className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs font-mono font-bold text-blue-400 shrink-0">{item.date || '---'}</span></td>
+      
+      <AutofillCell colKey="branch" rowIndex={index} value={editForm.branch} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.branches} value={editForm.branch} onChange={(val: string) => handleFieldChange('branch', val)} />
+      </AutofillCell>
+
+      <AutofillCell colKey="year" rowIndex={index} value={editForm.year} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.years} value={editForm.year} onChange={(val: string) => handleFieldChange('year', val)} />
+      </AutofillCell>
+
+      <td className="px-3 py-5 text-center"><Chip value={item.typeCol} /></td>
+      
+      <AutofillCell colKey="creator" rowIndex={index} value={editForm.creator} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.extraNames} value={editForm.creator} onChange={(val: string) => handleFieldChange('creator', val)} />
+      </AutofillCell>
+
+      <td className="px-3 py-5 text-center">
+        <div className="flex items-center justify-center gap-2">
+          <div 
+            onClick={() => {
+              if (item.id) {
+                navigator.clipboard.writeText(item.id);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/10 hover:border-emerald-500/30 transition-all duration-200 cursor-pointer shadow-sm text-xs font-mono font-bold text-emerald-400 hover:scale-[1.02] active:scale-95 group whitespace-nowrap"
+            title="اضغط لنسخ الكود"
+          >
+            <span className="tracking-wide">{item.id || '---'}</span>
+            {copied ? (
+              <Check size={12} className="text-emerald-400 shrink-0 animate-fadeIn" />
+            ) : (
+              <Copy size={12} className="text-emerald-500/40 group-hover:text-emerald-400 transition-colors shrink-0" />
+            )}
+          </div>
+          <button 
+            onClick={() => onToggleSubscribe(item.id)}
+            className={`transition-all duration-300 cursor-pointer p-2 rounded-xl border flex items-center justify-center ${
+              isSubscribed 
+                ? 'border-rose-500/40 bg-rose-500/10 text-rose-400 scale-105 shadow-[0_0_10px_rgba(244,63,94,0.2)]' 
+                : 'border-white/10 bg-white/5 text-white/30 hover:border-white/30 hover:bg-white/10 hover:text-white/60'
+            }`}
+            title={isSubscribed ? 'إلغاء المتابعة' : 'متابعة هذا السكريبت'}
+          >
+            <Bell size={12} className={isSubscribed ? 'animate-pulse' : ''} />
+          </button>
+        </div>
+      </td>
+
+      <AutofillCell colKey="dataFiles" rowIndex={index} value={editForm.dataFiles} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length} className="px-4 py-5 text-right font-bold arabic-text">
+        {isEditingDataFiles ? (
+          <input 
+            autoFocus
+            type="text" 
+            value={editForm.dataFiles} 
+            onChange={e => setEditForm({...editForm, dataFiles: e.target.value})}
+            onBlur={() => {
+              setIsEditingDataFiles(false);
+              if (editForm.dataFiles !== item.dataFiles) {
+                handleFieldChange('dataFiles', editForm.dataFiles);
+              }
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.currentTarget.blur();
+              }
+            }}
+            className={inputStyle + " min-w-[150px] text-left"} 
+            placeholder="Paste Link..."
+          />
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            {(() => {
+              const parsed = parseCutsLink(item.dataFiles, 'Files Link');
+              if (!parsed) return <span className="text-muted/40 text-xs px-2 shrink-0">---</span>;
+              
+              if (parsed.isLink) {
+                return (
+                  <a 
+                    href={parsed.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-xl text-[11px] font-extrabold transition-all text-blue-400 shadow-sm shrink-0 hover:scale-[1.02] active:scale-95 cursor-pointer"
+                  >
+                    <FolderOpen size={12} className="shrink-0 text-blue-400" />
+                    <span className="truncate max-w-[130px] arabic-text" title={parsed.url}>{parsed.text}</span>
+                  </a>
+                );
+              } else {
+                return (
+                  <span className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl text-[11px] font-bold text-white/90 shadow-sm shrink-0">
+                    <span className="truncate max-w-[130px] arabic-text" title={parsed.text}>{parsed.text}</span>
+                  </span>
+                );
+              }
+            })()}
+            <button 
+              onClick={() => setIsEditingDataFiles(true)} 
+              className="p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-muted hover:text-white transition-all scale-95 cursor-pointer shrink-0" 
+              title="تعديل لينك الملفات"
+            >
+              <Pencil size={11} />
+            </button>
+          </div>
+        )}
+      </AutofillCell>
+
+      <AutofillCell colKey="script" rowIndex={index} value={editForm.script} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length} className="px-4 py-5 text-right font-bold arabic-text">
+        {isEditingScript ? (
+          <input 
+            autoFocus
+            type="text" 
+            value={editForm.script} 
+            onChange={e => setEditForm({...editForm, script: e.target.value})}
+            onBlur={() => {
+              setIsEditingScript(false);
+              if (editForm.script !== item.script) {
+                handleFieldChange('script', editForm.script);
+              }
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.currentTarget.blur();
+              }
+            }}
+            className={inputStyle + " min-w-[150px] text-left"} 
+            placeholder="Paste Link..."
+          />
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            {(() => {
+              const parsed = parseCutsLink(item.script, 'Idea/Content Link');
+              if (!parsed) return <span className="text-muted/40 text-xs px-2 shrink-0">---</span>;
+              
+              if (parsed.isLink) {
+                return (
+                  <a 
+                    href={parsed.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-xl text-[11px] font-extrabold transition-all text-blue-400 shadow-sm shrink-0 hover:scale-[1.02] active:scale-95 cursor-pointer"
+                  >
+                    <FolderOpen size={12} className="shrink-0 text-blue-400" />
+                    <span className="truncate max-w-[130px] arabic-text" title={parsed.url}>{parsed.text}</span>
+                  </a>
+                );
+              } else {
+                return (
+                  <span className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl text-[11px] font-bold text-white/90 shadow-sm shrink-0">
+                    <span className="truncate max-w-[130px] arabic-text" title={parsed.text}>{parsed.text}</span>
+                  </span>
+                );
+              }
+            })()}
+            <button 
+              onClick={() => setIsEditingScript(true)} 
+              className="p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-muted hover:text-white transition-all scale-95 cursor-pointer shrink-0" 
+              title="تعديل الشرح"
+            >
+              <Pencil size={11} />
+            </button>
+          </div>
+        )}
+      </AutofillCell>
+
+      <AutofillCell colKey="type" rowIndex={index} value={editForm.type} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.types} value={editForm.type} onChange={(val: string) => handleFieldChange('type', val)} />
+      </AutofillCell>
+
+      <AutofillCell colKey="format" rowIndex={index} value={editForm.format} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.formats} value={editForm.format} onChange={(val: string) => handleFieldChange('format', val)} />
+      </AutofillCell>
+
+      <AutofillCell colKey="creatorNotes" rowIndex={index} value={editForm.creatorNotes} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length} className="px-5 py-5 text-center text-xs font-bold text-white/90 arabic-text">
+        <HistoryInput
+          itemKey={item.id}
+          fieldKey="cuts_creator_notes"
+          value={editForm.creatorNotes}
+          onChange={(val: string) => handleFieldChange('creatorNotes', val)}
+          placeholder="ملاحظات المبتكر..."
+          disabled={false}
+        />
+      </AutofillCell>
+
+      <AutofillCell colKey="editorNotes" rowIndex={index} value={editForm.editorNotes} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length} className="px-5 py-5 text-center text-xs font-bold text-white/90 arabic-text">
+        <HistoryInput
+          itemKey={item.id}
+          fieldKey="cuts_editor_notes"
+          value={editForm.editorNotes}
+          onChange={(val: string) => handleFieldChange('editorNotes', val)}
+          placeholder="ملاحظات المحرر..."
+          disabled={false}
+        />
+      </AutofillCell>
+
+      {/* Missing Details Checkmark (تفاصيل ناقصة) - amber-500 (yellow) */}
+      <td className="px-3 py-5 text-center">
+        <button
+          onClick={() => toggleStatus('missingDetails', isMissing)}
+          className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all duration-300 cursor-pointer ${
+            isMissing ? 'bg-amber-500 text-white shadow-[0_0_10px_rgba(245,158,11,0.5)]' : 'bg-white/10 text-muted hover:bg-amber-500/30 hover:text-amber-300'
+          }`}
+          title="تفاصيل ناقصة"
+        >
+          {isMissing && <CheckCircle2 size={14} />}
+        </button>
+      </td>
+
+      {/* Problem Checkmark (مشكلة) - rose-500 (red) */}
+      <td className="px-3 py-5 text-center">
+        <button
+          onClick={() => toggleStatus('problem', isProblem)}
+          className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all duration-300 cursor-pointer ${
+            isProblem ? 'bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.5)]' : 'bg-white/10 text-muted hover:bg-rose-500/30 hover:text-rose-300'
+          }`}
+          title="مشكلة"
+        >
+          {isProblem && <CheckCircle2 size={14} />}
+        </button>
+      </td>
+
+      {/* DONE Checkmark (DONE) - emerald-500 (green) */}
+      <td className="px-3 py-5 text-center">
+        <button
+          onClick={() => toggleStatus('done', isDone)}
+          className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all duration-300 cursor-pointer ${
+            isDone ? 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-white/10 text-muted hover:bg-emerald-500/30 hover:text-emerald-300'
+          }`}
+          title="تم الإنجاز"
+        >
+          {isDone && <CheckCircle2 size={14} />}
+        </button>
+      </td>
+
+      <AutofillCell colKey="editor" rowIndex={index} value={editForm.editor} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApply={onApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} liveDataLength={liveData?.length}>
+        <InlineCombobox options={optionsLists?.editors} value={editForm.editor} onChange={(val: string) => handleFieldChange('editor', val)} />
+      </AutofillCell>
+
+      <td className="px-4 py-5 text-center">
+        <div className="flex flex-col gap-2 items-center justify-center">
+          {isEditingFinal ? (
+            <input 
+              autoFocus
+              type="text" 
+              value={editForm.driveFinal} 
+              onChange={e => setEditForm({...editForm, driveFinal: e.target.value})}
+              onBlur={() => {
+                setIsEditingFinal(false);
+                if (editForm.driveFinal !== item.driveFinal) {
+                  handleFieldChange('driveFinal', editForm.driveFinal);
+                }
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
+                }
+              }}
+              className="w-full max-w-[150px] bg-white/5 border border-white/10 hover:bg-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-center text-white/90 outline-none transition-all focus:bg-[#0b1019] focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 text-left" 
+              placeholder="Paste Final Link..."
+            />
+          ) : (
+            <div className="flex items-center justify-center gap-1.5">
+              {item.driveFinal ? (
+                (() => {
+                  const parsed = parseCutsLink(item.driveFinal, 'Final');
+                  return (
+                    <a 
+                      href={parsed?.url || '#'} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 font-mono text-[11px] underline cursor-pointer shadow-sm shrink-0 truncate max-w-[220px]"
+                      title={parsed?.url || ''}
+                    >
+                      {parsed?.url || ''}
+                    </a>
+                  );
+                })()
+              ) : (
+                <span className="text-muted/40 text-xs px-2 shrink-0">---</span>
+              )}
+              <button 
+                onClick={() => setIsEditingFinal(true)} 
+                className="p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-muted hover:text-white transition-all scale-95 cursor-pointer shrink-0" 
+                title="تعديل لينك فاينال"
+              >
+                <Pencil size={11} />
+              </button>
+            </div>
+          )}
+          {isSaving && (
+            <span className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin block" title="جاري الحفظ تلقائياً..." />
+          )}
+        </div>
+      </td>
+
+      {/* Canceled Checkmark (CANCELO) - red-500 (red) */}
+      <td className="px-3 py-5 text-center">
+        <button
+          onClick={() => toggleStatus('canceled', isCanceled)}
+          className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all duration-300 cursor-pointer ${
+            isCanceled ? 'bg-red-500 text-white shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-white/10 text-muted hover:bg-red-500/30 hover:text-red-300'
+          }`}
+          title="ملغي"
+        >
+          {isCanceled && <CheckCircle2 size={14} />}
+        </button>
+      </td>
+    </motion.tr>
+  );
+};
+
+const TAGME_DAILY_PRIORITY_LIMIT = 10;
+
+const TagmeAnalyticsDashboard = ({ combinedData, tagmeTransfers, loading, taskStatuses, taskPriorities }: any) => {
   const stats = useMemo(() => {
-    const total = combined.length;
-    const completed = combined.filter(i => {
+    const isCompleted = (i: any) => {
+      if (!i) return false;
       const key = i.uniqueKey || generateKey(i);
-      if (taskStatuses && taskStatuses[key] !== undefined) return taskStatuses[key].done;
+      if (taskStatuses && taskStatuses[key] !== undefined) {
+        const val = taskStatuses[key];
+        if (val && typeof val === 'object') return !!val.done;
+        return !!val;
+      }
       return String(i.done) === 'true' || i.done === true;
-    }).length;
+    };
+
+    const dataList = combinedData || [];
+    const total = dataList.length;
+    const completed = dataList.filter(isCompleted).length;
     const pending = total - completed;
-    const priority = combined.filter(i => {
+
+    // Priority: count from taskPriorities overrides + raw data (deduplicated)
+    const priorityFromOverrides = Object.values(taskPriorities || {}).filter(v => v === true).length;
+    const priorityFromRaw = dataList.filter((i: any) => {
+      if (!i) return false;
       const key = i.uniqueKey || generateKey(i);
-      if (taskPriorities && taskPriorities[key] !== undefined) return taskPriorities[key];
+      // Only count if not overridden
+      if (taskPriorities && taskPriorities[key] !== undefined) return false;
       return String(i.priority) === 'true' || i.priority === true;
     }).length;
-    const transfersCount = tagmeTransfers.length;
+    const priority = priorityFromOverrides + priorityFromRaw;
+    const priorityLimitPct = Math.min(100, Math.round((priority / TAGME_DAILY_PRIORITY_LIMIT) * 100));
+    const transfersCount = (tagmeTransfers || []).length;
 
     // Stage breakdown
-    const stageMap: Record<string, { count: number, completed: number }> = {};
-    combined.forEach(i => {
+    const stageMap: Record<string, { count: number, completed: number, priority: number }> = {};
+    dataList.forEach((i: any) => {
+      if (!i) return;
       const stage = (i.opSheet || 'أخرى').trim();
-      if (!stageMap[stage]) stageMap[stage] = { count: 0, completed: 0 };
+      if (!stageMap[stage]) stageMap[stage] = { count: 0, completed: 0, priority: 0 };
       stageMap[stage].count++;
-      if (String(i.done) === 'true' || i.done === true) stageMap[stage].completed++;
+      if (isCompleted(i)) stageMap[stage].completed++;
+      const key = i.uniqueKey || generateKey(i);
+      const isPri = taskPriorities && taskPriorities[key] !== undefined 
+        ? !!taskPriorities[key] 
+        : (String(i.priority) === 'true' || i.priority === true);
+      if (isPri) stageMap[stage].priority++;
     });
 
     // Editor breakdown
-    const editorMap: Record<string, { count: number, completed: number }> = {};
-    combined.forEach(i => {
+    const editorMap: Record<string, { count: number, completed: number, priority: number }> = {};
+    dataList.forEach((i: any) => {
+      if (!i) return;
       const editor = (i.editor || 'غير محدد').trim();
-      if (!editorMap[editor]) editorMap[editor] = { count: 0, completed: 0 };
+      if (editor === 'غير محدد') return;
+      if (!editorMap[editor]) editorMap[editor] = { count: 0, completed: 0, priority: 0 };
       editorMap[editor].count++;
-      if (String(i.done) === 'true' || i.done === true) editorMap[editor].completed++;
+      if (isCompleted(i)) editorMap[editor].completed++;
+      const key = i.uniqueKey || generateKey(i);
+      const isPri = taskPriorities && taskPriorities[key] !== undefined 
+        ? !!taskPriorities[key] 
+        : (String(i.priority) === 'true' || i.priority === true);
+      if (isPri) editorMap[editor].priority++;
     });
 
     // Branch breakdown
     const branchMap: Record<string, { count: number, completed: number }> = {};
-    combined.forEach(i => {
+    dataList.forEach((i: any) => {
+      if (!i) return;
       const branch = (i.branch || 'غير محدد').trim();
       if (!branchMap[branch]) branchMap[branch] = { count: 0, completed: 0 };
       branchMap[branch].count++;
-      if (String(i.done) === 'true' || i.done === true) branchMap[branch].completed++;
+      if (isCompleted(i)) branchMap[branch].completed++;
     });
 
     return { 
@@ -825,12 +2713,13 @@ const TagmeAnalyticsDashboard = ({ liveData, tagmeTransfers, loading }: any) => 
       completed, 
       pending, 
       priority, 
+      priorityLimitPct,
       transfersCount, 
       stageMap: Object.entries(stageMap).sort((a,b) => b[1].count - a[1].count), 
       editorMap: Object.entries(editorMap).sort((a,b) => b[1].count - a[1].count),
       branchMap: Object.entries(branchMap).sort((a,b) => b[1].count - a[1].count)
     };
-  }, [combined, tagmeTransfers]);
+  }, [combinedData, tagmeTransfers, taskStatuses, taskPriorities]);
 
   if (loading) {
     return (
@@ -898,13 +2787,26 @@ const TagmeAnalyticsDashboard = ({ liveData, tagmeTransfers, loading }: any) => 
 
         <div className="p-6 rounded-3xl bg-white/[0.02] border border-white/10 hover:border-purple-500/50 transition-all duration-300 group hover:shadow-[0_0_30px_rgba(147,51,234,0.15)] relative overflow-hidden">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-black text-muted group-hover:text-purple-300 transition-colors arabic-text">أولوية قصوى</span>
-            <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center group-hover:scale-110 transition-transform animate-pulse shadow-[0_0_15px_rgba(147,51,234,0.5)]">
+            <span className="text-xs font-black text-muted group-hover:text-purple-300 transition-colors arabic-text">أولوية نشطة</span>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform shadow-[0_0_15px_rgba(147,51,234,0.5)] ${
+              stats.priority >= TAGME_DAILY_PRIORITY_LIMIT ? 'bg-rose-500/20 text-rose-400 animate-pulse' : 'bg-purple-500/20 text-purple-400 animate-pulse'
+            }`}>
               <AlertCircle size={20} />
             </div>
           </div>
-          <h3 className="text-4xl font-black tracking-tight text-purple-400">{stats.priority}</h3>
-          <p className="text-[10px] text-purple-300 mt-2 arabic-text opacity-80">دروس تتطلب تسليم فوري</p>
+          <h3 className={`text-4xl font-black tracking-tight ${
+            stats.priority >= TAGME_DAILY_PRIORITY_LIMIT ? 'text-rose-400' : 'text-purple-400'
+          }`}>{stats.priority}<span className="text-base text-muted font-bold">/{TAGME_DAILY_PRIORITY_LIMIT}</span></h3>
+          <div className="mt-2 w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+            <div className={`h-full rounded-full transition-all duration-1000 ${
+              stats.priority >= TAGME_DAILY_PRIORITY_LIMIT ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]' : 'bg-purple-500'
+            }`} style={{ width: `${stats.priorityLimitPct}%` }} />
+          </div>
+          <p className={`text-[10px] mt-1.5 arabic-text opacity-80 font-bold ${
+            stats.priority >= TAGME_DAILY_PRIORITY_LIMIT ? 'text-rose-300' : 'text-purple-300'
+          }`}>
+            {stats.priority >= TAGME_DAILY_PRIORITY_LIMIT ? '🔒 الحد الأقصى ممتلئ!' : `${TAGME_DAILY_PRIORITY_LIMIT - stats.priority} متبقي من الحد`}
+          </p>
         </div>
 
         <div className="p-6 rounded-3xl bg-white/[0.02] border border-white/10 hover:border-blue-500/50 transition-all duration-300 group hover:shadow-[0_0_30px_rgba(59,130,246,0.15)] relative overflow-hidden">
@@ -920,7 +2822,7 @@ const TagmeAnalyticsDashboard = ({ liveData, tagmeTransfers, loading }: any) => 
       </div>
 
       {/* Breakdown Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Stage Distribution */}
         <div className="glass-panel p-8 rounded-3xl border border-white/10 space-y-6 relative overflow-hidden group hover:border-emerald-500/30 transition-all">
           <div className="flex items-center justify-between border-b border-white/10 pb-4">
@@ -933,54 +2835,32 @@ const TagmeAnalyticsDashboard = ({ liveData, tagmeTransfers, loading }: any) => 
             <span className="text-xs text-muted font-bold">{stats.stageMap.length} مراحل نشطة</span>
           </div>
           <div className="space-y-5 max-h-[360px] overflow-y-auto pr-2">
-            {stats.stageMap.map(([stage, { count, completed }]) => (
-              <div key={stage} className="space-y-2">
-                <div className="flex justify-between text-sm arabic-text font-bold">
-                  <span className="text-white/90">{stage}</span>
-                  <div className="flex items-center gap-4 text-xs font-mono">
-                    <span className="text-emerald-400">{completed} مكتمل</span>
-                    <span className="text-muted">/</span>
-                    <span className="text-white">{count} إجمالي</span>
+            {stats.stageMap.map(([stage, data]) => {
+              const { count, completed, priority: stagePriority } = data as { count: number, completed: number, priority: number };
+              return (
+                <div key={stage} className="space-y-2">
+                  <div className="flex justify-between text-sm arabic-text font-bold">
+                    <span className="text-white/90 flex items-center gap-2">
+                      {stage}
+                      {stagePriority > 0 && (
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                          ⚡{stagePriority}
+                        </span>
+                      )}
+                    </span>
+                    <div className="flex items-center gap-4 text-xs font-mono">
+                      <span className="text-emerald-400">{completed} مكتمل</span>
+                      <span className="text-muted">/</span>
+                      <span className="text-white">{count} إجمالي</span>
+                    </div>
+                  </div>
+                  <div className="w-full bg-white/5 rounded-full h-2.5 overflow-hidden p-0.5 flex">
+                    <div className="bg-gradient-to-l from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-1000 shadow-sm" style={{ width: `${(completed/count)*100}%` }} />
+                    <div className="bg-white/15 h-full transition-all duration-1000 rounded-full" style={{ width: `${((count-completed)/count)*100}%` }} />
                   </div>
                 </div>
-                <div className="w-full bg-white/5 rounded-full h-2.5 overflow-hidden p-0.5 flex">
-                  <div className="bg-gradient-to-l from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-1000 shadow-sm" style={{ width: `${(completed/count)*100}%` }} />
-                  <div className="bg-white/15 h-full transition-all duration-1000 rounded-full" style={{ width: `${((count-completed)/count)*100}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Editors Performance */}
-        <div className="glass-panel p-8 rounded-3xl border border-white/10 space-y-6 relative overflow-hidden group hover:border-emerald-500/30 transition-all">
-          <div className="flex items-center justify-between border-b border-white/10 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                <Users size={20} />
-              </div>
-              <h3 className="text-xl font-black text-white arabic-text">أداء المحررين وحالة المونتاج</h3>
-            </div>
-            <span className="text-xs text-muted font-bold">{stats.editorMap.length} محررين</span>
-          </div>
-          <div className="space-y-5 max-h-[360px] overflow-y-auto pr-2">
-            {stats.editorMap.map(([editor, { count, completed }]) => (
-              <div key={editor} className="space-y-2">
-                <div className="flex justify-between text-sm arabic-text font-bold">
-                  <span className="text-white/90 flex items-center gap-2">
-                    <Award size={14} className="text-amber-400" />
-                    <span>{editor}</span>
-                  </span>
-                  <div className="flex items-center gap-3 text-xs font-mono">
-                    <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-lg">{Math.round((completed/count)*100)}% إنجاز</span>
-                    <span className="text-white">{completed} / {count} تجميعة كاملة</span>
-                  </div>
-                </div>
-                <div className="w-full bg-white/5 rounded-full h-2.5 overflow-hidden">
-                  <div className="bg-gradient-to-l from-emerald-500 to-indigo-500 h-full rounded-full transition-all duration-1000 shadow-sm" style={{ width: `${(completed/count)*100}%` }} />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -1015,6 +2895,46 @@ const TagmeAnalyticsDashboard = ({ liveData, tagmeTransfers, loading }: any) => 
           </div>
         </div>
       </div>
+
+      {/* Editor Priority Breakdown */}
+      {stats.editorMap.some(([, d]) => (d as any).priority > 0) && (
+        <div className="glass-panel p-8 rounded-3xl border border-purple-500/20 space-y-6 relative overflow-hidden bg-purple-500/[0.02]">
+          <div className="flex items-center justify-between border-b border-white/10 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 animate-pulse">
+                <AlertCircle size={20} />
+              </div>
+              <h3 className="text-xl font-black text-white arabic-text">توزيع الأولويات على المحررين</h3>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`text-xs font-black px-3 py-1.5 rounded-xl border ${
+                stats.priority >= TAGME_DAILY_PRIORITY_LIMIT 
+                  ? 'bg-rose-500/15 border-rose-500/30 text-rose-400' 
+                  : 'bg-purple-500/15 border-purple-500/30 text-purple-400'
+              }`}>
+                الحد الأقصى: {TAGME_DAILY_PRIORITY_LIMIT} | نشط: {stats.priority}
+              </span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {stats.editorMap.filter(([, d]) => (d as any).priority > 0).map(([editor, data]) => {
+              const { priority: editorPriority, count } = data as { count: number, completed: number, priority: number };
+              return (
+                <div key={editor} className="p-4 rounded-2xl bg-white/[0.02] border border-purple-500/20 hover:border-purple-500/40 transition-all">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-black text-white arabic-text truncate">{editor}</span>
+                    <span className="text-lg font-black text-purple-400">{editorPriority}</span>
+                  </div>
+                  <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                    <div className="bg-purple-500 h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, (editorPriority/count)*100)}%` }} />
+                  </div>
+                  <p className="text-[9px] text-muted mt-1">{editorPriority} أولوية من {count} مهمة</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1025,17 +2945,48 @@ function App() {
   const [rolePermissions, setRolePermissions] = useState<any>(DEFAULT_ROLE_PERMISSIONS);
   const [activeGid, setActiveGid] = useState('1476192399');
   const [activeLabel, setActiveLabel] = useState('Operations');
+  const [appMode, setAppMode] = useState<'OP' | 'REELS'>('OP');
   const isUsersPage = activeGid === '__users__';
 
   const isOperations = activeGid === '1476192399';
   const isTagme3at = activeGid === '1535230545';
   const isAnalyticsTagme = activeGid === 'analytics_tagme3at';
-  const isStage = !isOperations && !isTagme3at && !isAnalyticsTagme;
+  const isReelsAnalytics = activeGid === 'reels-analytics';
+  const isReelsStage = ['1436746012', '1939073164', '0', '798246690'].includes(activeGid);
+  const isStage = !isOperations && !isTagme3at && !isAnalyticsTagme && !isReelsAnalytics;
 
-  const sheetGidToFetch = isAnalyticsTagme ? '1535230545' : activeGid;
-  const { data: liveData, loading, refresh } = useGoogleSheets(sheetGidToFetch);
+  const sheetGidToFetch = isAnalyticsTagme ? '1535230545' : isReelsAnalytics ? '1436746012' : activeGid;
+  const activeDocId = isReelsStage ? '2PACX-1vTvcQ3v1JOzacx9tcsYrbriofFyHlu7rOKKlsobvpP9vjnbHGcg_Qn9TLlbkgB2YsGiX0GO1U4wlZjd' : undefined;
+  const { data: liveData, updateData: setLiveData, loading, refresh } = useGoogleSheets(sheetGidToFetch, activeDocId);
 
   const [itemToasts, setItemToasts] = useState<{ id: string, name: string, filingName?: string }[]>([]);
+
+  const toast = useMemo(() => {
+    const show = (msg: string, variant: 'success' | 'error' | 'loading' = 'success', options?: { id?: string }) => {
+      const id = options?.id || 'toast-' + Math.random().toString(36).substr(2, 9);
+      const icon = variant === 'success' ? '✅' : variant === 'error' ? '❌' : '⏳';
+      
+      setItemToasts(prev => {
+        const filtered = prev.filter(t => t.id !== id);
+        return [...filtered, { id, name: `${icon} ${msg}` }];
+      });
+
+      if (variant !== 'loading') {
+        setTimeout(() => {
+          setItemToasts(prev => prev.filter(t => t.id !== id));
+        }, 4000);
+      }
+      return id;
+    };
+    return {
+      success: (msg: string, options?: { id?: string }) => show(msg, 'success', options),
+      error: (msg: string, options?: { id?: string }) => show(msg, 'error', options),
+      loading: (msg: string, options?: { id?: string }) => show(msg, 'loading', options),
+      dismiss: (id: string) => {
+        setItemToasts(prev => prev.filter(t => t.id !== id));
+      }
+    };
+  }, []);
 
   // Background polling every 45 seconds to fetch changes silently
   useEffect(() => {
@@ -1058,9 +3009,19 @@ function App() {
 
   // ─── Personal Notifications via Supabase Realtime Broadcast ───────────────
   type PersonalNotif = { id: string; taskName: string; message: string; type: string; from: string; at: number; read: boolean; };
-  const [myNotifs, setMyNotifs] = useState<PersonalNotif[]>([]);
+  const [myNotifs, setMyNotifs] = useState<PersonalNotif[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('my_notifications') || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
   const [showMyNotifs, setShowMyNotifs] = useState(false);
   const unreadCount = myNotifs.filter(n => !n.read).length;
+
+  useEffect(() => {
+    localStorage.setItem('my_notifications', JSON.stringify(myNotifs));
+  }, [myNotifs]);
 
 
 
@@ -1072,6 +3033,7 @@ function App() {
 
   const [tagmeTransfers, setTagmeTransfers] = useState<any[]>([]);
   const [activeTagmeToast, setActiveTagmeToast] = useState<{ item: any, stage: { gid: string, label: string }, uniqueKey: string } | null>(null);
+const [activeVeToast, setActiveVeToast] = useState<{ item: any } | null>(null);
 
   const [assignedEditors, setAssignedEditors] = useState<Record<string, string>>(() => {
     const saved = localStorage.getItem('assigned_editors');
@@ -1145,6 +3107,38 @@ function App() {
     return {};
   });
 
+  const [assignedThumbnailLinks, setAssignedThumbnailLinks] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('assigned_thumbnail_links');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {};
+  });
+
+  const [assignedTimes, setAssignedTimes] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('assigned_times');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {};
+  });
+
+  const [assignedYoutubeLinks, setAssignedYoutubeLinks] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('assigned_youtube_links');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {};
+  });
+
+  const [uploadedStatuses, setUploadedStatuses] = useState<Record<string, boolean>>(() => {
+    const saved = localStorage.getItem('uploaded_statuses');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {};
+  });
+
   const handleUpdateDate = (itemKey: string, val: string) => {
     setAssignedDates(prev => {
       const updated = { ...prev, [itemKey]: val };
@@ -1157,17 +3151,76 @@ function App() {
   const handleUpdateBunnyLink = (itemKey: string, val: string) => {
     setAssignedBunnyLinks(prev => {
       const updated = { ...prev, [itemKey]: val };
-      localStorage.setItem('assigned_bunny_links', JSON.stringify(updated));
+      const taskName = findTaskName(itemKey);
+      syncState('assigned_bunny_links', updated, itemKey, taskName, 'bunny_link', `🔗 تم تحديث رابط الفيديو`);
+      return updated;
+    });
+  };
+
+  const handleUpdateThumbnailLink = (itemKey: string, val: string) => {
+    setAssignedThumbnailLinks(prev => {
+      const updated = { ...prev, [itemKey]: val };
+      const taskName = findTaskName(itemKey);
+      syncState('assigned_thumbnail_links', updated, itemKey, taskName, 'thumbnail_link', `🖼️ تم تحديث رابط الثمنيل`);
+      return updated;
+    });
+  };
+
+  const handleUpdateTime = (itemKey: string, val: string) => {
+    setAssignedTimes(prev => {
+      const updated = { ...prev, [itemKey]: val };
+      const taskName = findTaskName(itemKey);
+      syncState('assigned_times', updated, itemKey, taskName, 'time', `⏱️ تم تحديث وقت الدرس إلى: ${val}`);
+      return updated;
+    });
+  };
+
+  const handleUpdateYoutubeLink = (itemKey: string, val: string) => {
+    setAssignedYoutubeLinks(prev => {
+      const updated = { ...prev, [itemKey]: val };
+      const taskName = findTaskName(itemKey);
+      syncState('assigned_youtube_links', updated, itemKey, taskName, 'youtube_link', `📺 تم تحديث رابط اليوتيوب`);
+      return updated;
+    });
+  };
+
+  const handleUpdateUploaded = (itemKey: string, val: boolean) => {
+    setUploadedStatuses(prev => {
+      const updated = { ...prev, [itemKey]: val };
+      const taskName = findTaskName(itemKey);
+      syncState('uploaded_statuses', updated, itemKey, taskName, 'uploaded', val ? `📤 تم الرفع بنجاح` : `↩️ تم إلغاء رفع التجميعة`);
       return updated;
     });
   };
 
   const syncState = async (field: string, dict: any, itemKey: string, taskName: string, type: string, message: string) => {
     localStorage.setItem(field, JSON.stringify(dict));
-    if (session?.access_token) {
+    const token = session?.access_token || profile?.id;
+    if (token) {
+      if (activeGid === '1535230545' && itemKey && field !== 'tagme3at_transfers' && field !== 'youtube_transfers' && field !== 'assigned_bunny_links') {
+        let updatePayload: any = {};
+        if (field === 'editor_notes') updatePayload = { notesEditors: dict[itemKey] };
+        else if (field === 'marketing_notes') updatePayload = { notesMarketing: dict[itemKey] };
+        else if (field === 'assigned_editors') updatePayload = { editor: dict[itemKey] };
+        else if (field === 'task_statuses') updatePayload = { done: dict[itemKey] === 'done' };
+        else if (field === 'task_priorities') updatePayload = { priority: dict[itemKey] === true };
+        else if (field === 'assigned_thumbnail_links') updatePayload = { thumbnailLink: dict[itemKey] };
+        else if (field === 'assigned_times') updatePayload = { time: dict[itemKey] };
+        else if (field === 'assigned_youtube_links') updatePayload = { youtubeLink: dict[itemKey] };
+        else if (field === 'uploaded_statuses') updatePayload = { uploaded: dict[itemKey] === true };
+        
+        if (Object.keys(updatePayload).length > 0) {
+          fetch(`/api/tagme3at/${itemKey}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(updatePayload)
+          }).catch(e => console.error('SQL Sync Error:', e));
+        }
+      }
+
       fetch('/api/task-metadata', {
          method: 'PUT',
-         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
          body: JSON.stringify({ field, metadata: dict })
       }).catch(e => console.error(e));
     }
@@ -1182,14 +3235,16 @@ function App() {
   };
 
   useEffect(() => {
-    if (!session?.access_token) return;
+    const token = session?.access_token || profile?.id;
+    if (!token) return;
     fetch('/api/task-metadata', {
-      headers: { 'Authorization': `Bearer ${session.access_token}` }
+      headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => res.json())
       .then(data => {
          if (data?.metadata) {
             const m = data.metadata;
+            console.log('[Sync] Metadata loaded from server:', Object.keys(m));
             if (m.assigned_editors) { setAssignedEditors(m.assigned_editors); localStorage.setItem('assigned_editors', JSON.stringify(m.assigned_editors)); }
             if (m.editor_notes) { setEditorNotes(m.editor_notes); localStorage.setItem('editor_notes', JSON.stringify(m.editor_notes)); }
             if (m.marketing_notes) { setMarketingNotes(m.marketing_notes); localStorage.setItem('marketing_notes', JSON.stringify(m.marketing_notes)); }
@@ -1198,10 +3253,14 @@ function App() {
             if (m.assigned_dates) { setAssignedDates(m.assigned_dates); localStorage.setItem('assigned_dates', JSON.stringify(m.assigned_dates)); }
             if (m.task_priorities) { setTaskPriorities(m.task_priorities); localStorage.setItem('task_priorities', JSON.stringify(m.task_priorities)); }
             if (m.task_statuses) { setTaskStatuses(m.task_statuses); localStorage.setItem('task_statuses', JSON.stringify(m.task_statuses)); }
+            if (m.local_entries_v1) { setLocalEntries(m.local_entries_v1); localStorage.setItem('local_entries_v1', JSON.stringify(m.local_entries_v1)); }
+            if (m.tagme3at_transfers) { setTagmeTransfers(m.tagme3at_transfers); localStorage.setItem('tagme3at_transfers', JSON.stringify(m.tagme3at_transfers)); }
+            if (m.youtube_transfers) { setYoutubeItems(m.youtube_transfers); localStorage.setItem('youtube_transfers', JSON.stringify(m.youtube_transfers)); }
+            if (m.assigned_bunny_links) { setAssignedBunnyLinks(m.assigned_bunny_links); localStorage.setItem('assigned_bunny_links', JSON.stringify(m.assigned_bunny_links)); }
          }
       })
       .catch(e => console.error(e));
-  }, [session?.access_token]);
+  }, [session?.access_token, profile?.id]);
 
   const [subscribedTasks, setSubscribedTasks] = useState<string[]>(() => {
     try {
@@ -1212,11 +3271,28 @@ function App() {
   });
 
   const toggleSubscribe = (itemKey: string) => {
-    setSubscribedTasks(prev => {
-      const next = prev.includes(itemKey) ? prev.filter(k => k !== itemKey) : [...prev, itemKey];
-      localStorage.setItem('subscribed_tasks', JSON.stringify(next));
-      return next;
-    });
+    const taskName = findTaskName(itemKey);
+    const isSubscribing = !subscribedTasks.includes(itemKey);
+    const next = isSubscribing 
+      ? [...subscribedTasks, itemKey] 
+      : subscribedTasks.filter(k => k !== itemKey);
+      
+    setSubscribedTasks(next);
+    localStorage.setItem('subscribed_tasks', JSON.stringify(next));
+
+    // Instantly inject a custom personal notification outside state callback
+    const notif: PersonalNotif = {
+      id: String(Date.now() + Math.random()),
+      taskName: taskName,
+      message: isSubscribing 
+        ? `🔔 لقد قمت بمتابعة هذه المهمة بنجاح! ستصلك تنبيهات بأي تحديثات تطرأ عليها.` 
+        : `🔕 تم إلغاء متابعة المهمة بنجاح.`,
+      type: isSubscribing ? 'subscribe' : 'unsubscribe',
+      from: 'النظام',
+      at: Date.now(),
+      read: false,
+    };
+    setMyNotifs(prevNotifs => [notif, ...prevNotifs].slice(0, 50));
   };
 
   const globalChannelRef = useRef<any>(null);
@@ -1251,12 +3327,16 @@ function App() {
     }).subscribe();
 
     // Subscribe to global channel for tasks
-    const globalCh = supabase.channel('tasks:global');
+    const globalCh = supabase.channel('tasks:global', {
+      config: { broadcast: { self: false } }
+    });
     globalChannelRef.current = globalCh;
     globalCh.on('broadcast', { event: 'update' }, ({ payload }: any) => {
       const { itemKey, taskName, message, type, from, field, dict } = payload;
+      if (!from || from.toLowerCase() === profile.name.toLowerCase()) return;
       
       if (field && dict) {
+         console.log('[Sync] Received broadcast update:', field, 'from:', from);
          localStorage.setItem(field, JSON.stringify(dict));
          if (field === 'assigned_editors') setAssignedEditors(dict);
          else if (field === 'editor_notes') setEditorNotes(dict);
@@ -1266,16 +3346,35 @@ function App() {
          else if (field === 'assigned_dates') setAssignedDates(dict);
          else if (field === 'task_priorities') setTaskPriorities(dict);
          else if (field === 'task_statuses') setTaskStatuses(dict);
+         else if (field === 'local_entries_v1') setLocalEntries(dict);
+         else if (field === 'tagme3at_transfers') setTagmeTransfers(dict);
+         else if (field === 'youtube_transfers') setYoutubeItems(dict);
+         else if (field === 'assigned_bunny_links') setAssignedBunnyLinks(dict);
+         else if (field === 'assigned_thumbnail_links') setAssignedThumbnailLinks(dict);
+         else if (field === 'assigned_times') setAssignedTimes(dict);
+         else if (field === 'assigned_youtube_links') setAssignedYoutubeLinks(dict);
+         else if (field === 'uploaded_statuses') setUploadedStatuses(dict);
       }
-      if (!from || from.toLowerCase() === profile.name.toLowerCase()) return;
 
       const currentEditor = assignedEditorsRef.current[itemKey];
+      
+      // 1. Subscription-based receipt (user followed this row or is its assigned editor)
       const isSub = subscribedTasksRef.current.includes(itemKey) || (currentEditor && currentEditor.toLowerCase() === profile.name.toLowerCase());
 
-      if (isSub) {
+      // 2. Manager or Admin global receipt (receives ALL activity logs and note writes in real time!)
+      const isManagerOrAdmin = profile?.role === 'admin' || profile?.role === 'manager';
+
+      // 3. Video team new additions receipt (receives any new VE/Shooting reel additions or Tagme3at transfers)
+      const isVideoTeam = profile?.team?.toLowerCase() === 'video';
+      const isNewVideoTask = isVideoTeam && (
+        type === 'tagme_transfer' || 
+        (type === 'new_entry' && (payload.activeGid === '1939073164' || payload.activeGid === '1436746012'))
+      );
+
+      if (isSub || isManagerOrAdmin || isNewVideoTask) {
         const notif: PersonalNotif = {
           id: String(Date.now() + Math.random()),
-          taskName,
+          taskName: taskName || itemKey,
           message,
           type,
           from,
@@ -1284,7 +3383,9 @@ function App() {
         };
         setMyNotifs(prev => [notif, ...prev].slice(0, 50));
       }
-    }).subscribe();
+    }).subscribe((status: string) => {
+      console.log('[Sync] WebSocket channel status:', status);
+    });
 
     return () => {
       supabase.removeChannel(userCh);
@@ -1327,7 +3428,10 @@ function App() {
         syncState('editor_notes', updated, itemKey, taskName, 'note', `📝 ملاحظة جديدة: "${noteText.slice(0, 60)}${noteText.length > 60 ? '...' : ''}"`);
       } else {
         localStorage.setItem('editor_notes', JSON.stringify(updated));
-        fetch('/api/task-metadata', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` }, body: JSON.stringify({ field: 'editor_notes', metadata: updated }) }).catch(e => console.error(e));
+        const token = session?.access_token || profile?.id;
+        if (token) {
+          fetch('/api/task-metadata', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ field: 'editor_notes', metadata: updated }) }).catch(e => console.error(e));
+        }
       }
       return updated;
     });
@@ -1341,7 +3445,10 @@ function App() {
         syncState('marketing_notes', updated, itemKey, taskName, 'marketing_note', `💬 ملاحظة تسويق: "${noteText.slice(0, 60)}${noteText.length > 60 ? '...' : ''}"`);
       } else {
         localStorage.setItem('marketing_notes', JSON.stringify(updated));
-        fetch('/api/task-metadata', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` }, body: JSON.stringify({ field: 'marketing_notes', metadata: updated }) }).catch(e => console.error(e));
+        const token = session?.access_token || profile?.id;
+        if (token) {
+          fetch('/api/task-metadata', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ field: 'marketing_notes', metadata: updated }) }).catch(e => console.error(e));
+        }
       }
       return updated;
     });
@@ -1366,10 +3473,15 @@ function App() {
           return n;
        });
     } else {
-       const done = (type === 'done' || type === 'uncancel') ? true : false;
-       const cancel = type === 'cancel';
        setTaskStatuses(prev => {
-          const n = { ...prev, [itemKey]: { done, cancel } };
+          const current = prev[itemKey] || { done: false, cancel: false };
+          let d = current.done;
+          let c = current.cancel;
+          if (type === 'done') d = true;
+          else if (type === 'undone') d = false;
+          else if (type === 'cancel') c = true;
+          else if (type === 'uncancel') c = false;
+          const n = { ...prev, [itemKey]: { done: d, cancel: c } };
           syncState('task_statuses', n, itemKey, taskName, type, message);
           return n;
        });
@@ -1434,13 +3546,19 @@ function App() {
 
   const editorsList = useMemo(() => {
     const set = new Set<string>();
-    const sourceData = activeGid === '1535230545' ? liveData : [];
+    const sourceData = Array.isArray(liveData) ? liveData : [];
     sourceData.forEach((i: any) => {
       if (i.editor && i.editor !== 'محرر' && i.editor !== 'غير محدد') {
         set.add(i.editor.trim());
       }
+      if (i.editorCol && i.editorCol !== 'محرر' && i.editorCol !== 'غير محدد' && i.editorCol !== '---') {
+        set.add(i.editorCol.trim());
+      }
     });
-    const defaults = ['HASSANEN', 'ABANOUB', 'SHIHAB', 'MAGED', 'KIRO', 'MOHAMED'];
+    const defaults = [
+      'HASSANEN', 'ABANOUB', 'SHIHAB', 'MAGED', 'KIRO', 'MOHAMED',
+      'ASHRAF', 'Basel', 'ESLAM', 'Ramaj', 'WAEL'
+    ];
     defaults.forEach(d => set.add(d));
     return Array.from(set).sort();
   }, [liveData, activeGid]);
@@ -1448,7 +3566,47 @@ function App() {
   const [localEntries, setLocalEntries] = useState<{ [gid: string]: any[] }>({});
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', filingName: '', val: '', id: '', subject: '', extra: '', editor: '', notesMarketing: '' });
+  const [shootingAddForm, setShootingAddForm] = useState({
+    branch: 'Alexandria',
+    year: 's3',
+    teacher: 'Hossam Elashry',
+    extraName: 'Ahmed',
+    scriptName: '',
+    scriptLink: '',
+    type: 'حواري',
+    format: 'REEL'
+  });
+
+  const generatedCode = useMemo(() => {
+    if (!['1436746012', '1939073164', '798246690', '0'].includes(activeGid)) return '';
+    const prefix = activeGid === '0'
+      ? `${shootingAddForm.year}-cut-${shootingAddForm.extraName}-`.toLowerCase().replace(/\s+/g, ' ')
+      : `${shootingAddForm.year}-${shootingAddForm.teacher}-${shootingAddForm.extraName}-`.toLowerCase().replace(/\s+/g, ' ');
+    const currentSheetData = Array.isArray(liveData) ? liveData : [];
+    let maxSeq = -1;
+    currentSheetData.forEach((row: any) => {
+      if (row.id && row.id.toLowerCase().startsWith(prefix)) {
+        const parts = row.id.split('-');
+        if (parts.length >= 4) {
+          const seqStr = parts[3].split(' ')[0];
+          const seq = parseInt(seqStr, 10);
+          if (!isNaN(seq) && seq > maxSeq) {
+            maxSeq = seq;
+          }
+        }
+      }
+    });
+    const nextSeq = maxSeq + 1;
+    return `${prefix}${nextSeq.toString().padStart(2, '0')} v6`.toLowerCase();
+  }, [shootingAddForm, liveData, activeGid]);
+
   const [colorfulTabs, setColorfulTabs] = useState(false);
+  const [visibleRecordsLimit, setVisibleRecordsLimit] = useState(200);
+
+  useEffect(() => {
+    setVisibleRecordsLimit(200);
+  }, [activeGid]);
+
   const [stageWeekFilter, setStageWeekFilter] = useState('All');
   const [glowingKeys, setGlowingKeys] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<'default' | 'name' | 'date' | 'addedDate'>('default');
@@ -1461,8 +3619,133 @@ function App() {
     }
   }, []);
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // For Shooting / reels / Cuts sheets
+    if (['1436746012', '1939073164', '798246690', '0'].includes(activeGid)) {
+      if (!shootingAddForm.scriptLink || !shootingAddForm.scriptLink.trim()) {
+        toast.error("يرجى إدخال رابط السكريبت");
+        return;
+      }
+      if (!shootingAddForm.scriptName) {
+        toast.error("يرجى إدخال اسم السكريبت");
+        return;
+      }
+      if (!generatedCode) {
+        toast.error("فشل في توليد الكود التلقائي");
+        return;
+      }
+
+      const token = session?.access_token || profile?.id;
+      if (!token) {
+        toast.error("يرجى تسجيل الدخول أولاً");
+        return;
+      }
+
+      toast.loading("جاري إضافة مهمة السكريبت الجديدة...", { id: 'add-reels-toast' });
+      try {
+        const scriptValue = shootingAddForm.scriptLink.trim()
+          ? `=HYPERLINK("${shootingAddForm.scriptLink.trim()}", "${shootingAddForm.scriptName.trim()}")`
+          : shootingAddForm.scriptName.trim();
+
+        let rowData: any[] = [];
+        if (activeGid === '0') {
+          // Cuts sheet has 18 columns (A to R)
+          rowData = [
+            new Date().toLocaleDateString('en-US'), // 0: Date
+            shootingAddForm.branch,                // 1: Branch
+            shootingAddForm.year,                  // 2: Year
+            'CUT',                                 // 3: TypeCol (static 'CUT')
+            shootingAddForm.extraName,             // 4: Creator
+            generatedCode,                         // 5: Code / id
+            '',                                    // 6: Data Files (empty)
+            scriptValue,                           // 7: Script
+            shootingAddForm.type,                  // 8: Type
+            shootingAddForm.format,                // 9: Format
+            '',                                    // 10: Creator Notes
+            '',                                    // 11: Editor Notes
+            'FALSE',                               // 12: Missing Details
+            'FALSE',                               // 13: Problem
+            'FALSE',                               // 14: Done
+            '',                                    // 15: Editor
+            '',                                    // 16: Drive Final
+            'FALSE'                                // 17: Canceled
+          ];
+        } else {
+          // Shooting / VE / Counter has 18 columns (A to R)
+          rowData = [
+            new Date().toLocaleDateString('en-US'), // 0: Date
+            shootingAddForm.branch,                // 1: Branch
+            shootingAddForm.year,                  // 2: السنة
+            shootingAddForm.teacher,               // 3: المدرس
+            shootingAddForm.extraName,             // 4: Column 5
+            generatedCode,                         // 5: code
+            scriptValue,                           // 6: السكريبت
+            shootingAddForm.type,                  // 7: النوع
+            shootingAddForm.format,                // 8: المقاس
+            'FALSE',                               // 9: اتصور؟
+            '',                                    // 10: تاريخ التصوير
+            '',                                    // 11: BY
+            '',                                    // 12: STORAGE
+            '',                                    // 13: NOTES
+            '',                                    // 14: Drive Link (Raw)
+            '',                                    // 15: EDITOR
+            'FALSE',                               // 16: DONE?
+            ''                                     // 17: Drive Link (Final)
+          ];
+        }
+
+        const res = await fetch('/api/reels/add', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ rowData, gid: activeGid })
+        });
+
+        if (!res.ok) {
+          throw new Error('Failed to append row to Google Sheets');
+        }
+
+        // Broadcast new entry over WebSocket to other clients
+        if (globalChannelRef.current && profile?.name) {
+          globalChannelRef.current.send({
+            type: 'broadcast',
+            event: 'update',
+            payload: {
+              itemKey: generatedCode,
+              taskName: scriptValue || generatedCode,
+              message: activeGid === '0' 
+                ? `🎬 تم إضافة مهمة مونتاج (Cut) جديدة: "${scriptValue || generatedCode}"`
+                : `🆕 تم إضافة سكريبت جديد: "${scriptValue || generatedCode}"`,
+              type: 'new_entry',
+              from: profile.name,
+              activeGid
+            }
+          });
+        }
+
+        toast.success(activeGid === '0' ? "تم إضافة الريل الجديد بنجاح في Google Sheets! 🎉" : "تم إضافة السكريبت الجديد بنجاح في Supabase و Google Sheets! 🎉", { id: 'add-reels-toast' });
+
+        // Reset and close
+        setShowAddModal(false);
+        setShootingAddForm(prev => ({
+          ...prev,
+          scriptName: '',
+          scriptLink: ''
+        }));
+
+        // Refresh the table to show the new row
+        refresh();
+      } catch (err: any) {
+        console.error(err);
+        toast.error("حدث خطأ أثناء الإضافة: " + err.message, { id: 'add-reels-toast' });
+      }
+      return;
+    }
+
     if (!addForm.name) return;
     const newItem = {
       ...addForm,
@@ -1479,7 +3762,7 @@ function App() {
       const list = prev[activeGid] || [];
       const updated = [newItem, ...list];
       const map = { ...prev, [activeGid]: updated };
-      localStorage.setItem('local_entries_v1', JSON.stringify(map));
+      syncState('local_entries_v1', map, newItem.uniqueKey, newItem.name, 'add_entry', `➕ تم إضافة مهمة جديدة يدوياً: "${newItem.name}"`);
       return map;
     });
     setShowAddModal(false);
@@ -1487,11 +3770,272 @@ function App() {
   };
 
   useEffect(() => {
+    // Load local transfers as fallback
     const saved = localStorage.getItem('tagme3at_transfers');
     if (saved) {
       try { setTagmeTransfers(JSON.parse(saved)); } catch (e) {}
     }
+    
+    // Load from SQL on mount and when gid changes
+    if (activeGid === '1535230545') {
+      fetch('/api/tagme3at').then(res => res.json()).then(data => {
+        if (data && data.items) {
+          const transfers = data.items.filter((i: any) => i.is_transfer).map((i: any) => ({
+            name: i.name, filingName: i.filing_name, opSheet: i.op_sheet, branch: i.branch, date: i.date,
+            notesMarketing: i.notes_marketing, editor: i.editor, notesEditors: i.notes_editors, done: i.done,
+            priority: i.priority, cancel: i.cancel, uniqueKey: i.unique_key, isTagmeTransfer: true,
+            thumbnailLink: i.thumbnail_link || '',
+            time: i.time || '',
+            youtubeLink: i.youtube_link || '',
+            uploaded: i.uploaded === true
+          }));
+          setTagmeTransfers(transfers);
+          
+          setEditorNotes(prev => { const n = {...prev}; data.items.forEach((i: any) => { if(i.notes_editors) n[i.unique_key] = i.notes_editors; }); return n; });
+          setMarketingNotes(prev => { const n = {...prev}; data.items.forEach((i: any) => { if(i.notes_marketing) n[i.unique_key] = i.notes_marketing; }); return n; });
+          setAssignedEditors(prev => { const n = {...prev}; data.items.forEach((i: any) => { if(i.editor) n[i.unique_key] = i.editor; }); return n; });
+          setTaskStatuses(prev => { const n = {...prev}; data.items.forEach((i: any) => { if(i.done) n[i.unique_key] = 'done'; }); return n; });
+          setTaskPriorities(prev => { const n = {...prev}; data.items.forEach((i: any) => { if(i.priority) n[i.unique_key] = true; }); return n; });
+          setAssignedThumbnailLinks(prev => { const n = {...prev}; data.items.forEach((i: any) => { if(i.thumbnail_link) n[i.unique_key] = i.thumbnail_link; }); return n; });
+          setAssignedTimes(prev => { const n = {...prev}; data.items.forEach((i: any) => { if(i.time) n[i.unique_key] = i.time; }); return n; });
+          setAssignedYoutubeLinks(prev => { const n = {...prev}; data.items.forEach((i: any) => { if(i.youtube_link) n[i.unique_key] = i.youtube_link; }); return n; });
+          setUploadedStatuses(prev => { const n = {...prev}; data.items.forEach((i: any) => { if(i.uploaded !== undefined) n[i.unique_key] = i.uploaded; }); return n; });
+        }
+      }).catch(e => console.error(e));
+    }
+  }, [activeGid]);
+
+  const [loadingFilmedCode, setLoadingFilmedCode] = useState<string | null>(null);
+
+  const [autofillDrag, setAutofillDrag] = useState<{
+    colKey: string;
+    startIdx: number;
+    currentIdx: number;
+    value: any;
+  } | null>(null);
+
+  const [activeCell, setActiveCell] = useState<{
+    colKey: string;
+    rowIndex: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.autofill-cell-td')) {
+        setActiveCell(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
+
+  const handleApplyAutofill = async (colKey: string, startIdx: number, endIdx: number, value: any) => {
+    const token = session?.access_token || profile?.id;
+    if (!token) return;
+
+    const data = Array.isArray(liveData) ? liveData : [];
+    const start = Math.min(startIdx, endIdx);
+    const end = Math.max(startIdx, endIdx);
+    
+    const rowsToUpdate = data.slice(start, end + 1);
+    if (rowsToUpdate.length === 0) return;
+
+    // 1. Optimistic UI update (Instant feedback!)
+    setLiveData((prev: any[]) => {
+      const updated = [...prev];
+      for (let i = start; i <= end; i++) {
+        if (updated[i]) {
+          updated[i] = { ...updated[i], [colKey]: value };
+        }
+      }
+      return updated;
+    });
+
+    // 2. Show instant success toast!
+    toast.success("تم تطبيق التعبئة التلقائية وحفظ البيانات بنجاح!", { id: 'autofill-toast' });
+
+    // 3. Fire a single batch update to the backend asynchronously without blocking the UI thread
+    const batchUpdates = rowsToUpdate.map((item) => {
+      const updatedItem = { ...item, [colKey]: value };
+      let rowData: any[] = [];
+
+      if (activeGid === '0') {
+        // Cuts sheet row data structure
+        rowData = [
+          updatedItem.date || '',
+          updatedItem.branch || '',
+          updatedItem.year || '',
+          updatedItem.typeCol || 'CUT',
+          updatedItem.creator || '',
+          updatedItem.id || '',
+          updatedItem.dataFiles || '',
+          updatedItem.script || '',
+          updatedItem.type || '',
+          updatedItem.format || '',
+          updatedItem.creatorNotes || '',
+          updatedItem.editorNotes || '',
+          updatedItem.missingDetails ? 'TRUE' : 'FALSE',
+          updatedItem.problem ? 'TRUE' : 'FALSE',
+          updatedItem.done ? 'TRUE' : 'FALSE',
+          updatedItem.editor || '',
+          updatedItem.driveFinal || '',
+          updatedItem.canceled ? 'TRUE' : 'FALSE'
+        ];
+      } else {
+        // Shooting / Ve sheet row data structure
+        rowData = [
+          updatedItem.date || '',
+          updatedItem.branch || '',
+          updatedItem.year || '',
+          updatedItem.teacher || '',
+          updatedItem.extraName || '',
+          updatedItem.id || '',
+          updatedItem.script || '',
+          updatedItem.type || '',
+          updatedItem.format || '',
+          updatedItem.filmed ? 'TRUE' : 'FALSE',
+          updatedItem.filmingDate || '',
+          updatedItem.by || '',
+          updatedItem.storage || '',
+          updatedItem.notes || '',
+          updatedItem.driveRaw || '',
+          updatedItem.editorCol || '',
+          updatedItem.done ? 'TRUE' : 'FALSE',
+          updatedItem.driveFinal || '',
+          updatedItem.canceled ? 'TRUE' : 'FALSE',
+          updatedItem.missingDetails ? 'TRUE' : 'FALSE'
+        ];
+      }
+
+      return { oldCode: item.id, rowData };
+    });
+
+    fetch('/api/reels/update-batch', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ updates: batchUpdates })
+    }).catch(err => console.error("Autofill background batch update error:", err));
+  };
+
+  useEffect(() => {
+    if (!autofillDrag) return;
+    const handleGlobalMouseUp = () => {
+      const { colKey, startIdx, currentIdx, value } = autofillDrag;
+      handleApplyAutofill(colKey, startIdx, currentIdx, value);
+      setAutofillDrag(null);
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, [autofillDrag]);
+
+  const handleUpdateShootingRow = async (oldCode: string, newRowData: any[]) => {
+    const token = session?.access_token || profile?.id;
+    if (!token) return;
+    try {
+      const res = await fetch('/api/reels/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ oldCode, rowData: newRowData })
+      });
+      if (!res.ok) { const text = await res.text(); throw new Error('Failed to update row: ' + res.status + ' ' + text); }
+
+      // Update local liveData state instantly for seamless UI consistency!
+      setLiveData((prev: any[]) => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.map((row: any) => {
+          if (row.id === oldCode) {
+            if (activeGid === '0') {
+              return {
+                ...row,
+                branch: newRowData[1],
+                year: newRowData[2],
+                typeCol: newRowData[3],
+                creator: newRowData[4],
+                id: newRowData[5], // new code
+                dataFiles: newRowData[6],
+                script: newRowData[7],
+                type: newRowData[8],
+                format: newRowData[9],
+                creatorNotes: newRowData[10],
+                editorNotes: newRowData[11],
+                missingDetails: newRowData[12] === 'TRUE' || newRowData[12] === true,
+                problem: newRowData[13] === 'TRUE' || newRowData[13] === true,
+                done: newRowData[14] === 'TRUE' || newRowData[14] === true,
+                editor: newRowData[15],
+                driveFinal: newRowData[16],
+                canceled: newRowData[17] === 'TRUE' || newRowData[17] === true
+              };
+            } else {
+              return {
+                ...row,
+                branch: newRowData[1],
+                year: newRowData[2],
+                teacher: newRowData[3],
+                extraName: newRowData[4],
+                id: newRowData[5], // new code
+                script: newRowData[6],
+                type: newRowData[7],
+                format: newRowData[8],
+                filmed: newRowData[9] === 'TRUE' || newRowData[9] === true,
+                filmingDate: newRowData[10],
+                by: newRowData[11],
+                storage: newRowData[12],
+                notes: newRowData[13],
+                driveRaw: newRowData[14],
+                editorCol: newRowData[15],
+                done: newRowData[16] === 'TRUE' || newRowData[16] === true,
+                driveFinal: newRowData[17],
+                canceled: newRowData[18] === 'TRUE' || newRowData[18] === true,
+                missingDetails: newRowData[19] === 'TRUE' || newRowData[19] === true
+              };
+            }
+          }
+          return row;
+        });
+      });
+
+      toast.success("تم تحديث الصف بنجاح!");
+    } catch (err: any) {
+      console.error(err);
+      toast.error("حدث خطأ أثناء التحديث: " + err.message);
+    }
+  };
+
+  const handleFilmedToggle = async (item: any, isFilmed: boolean) => {
+    if (!item.id) {
+      alert("لا يمكن تعديل هذا الصف لعدم وجود كود (Code)");
+      return;
+    }
+    const token = session?.access_token || profile?.id;
+    if (!token) return;
+
+    // Optimistic UI update for instant feedback
+    setLiveData((prev: any[]) => prev.map((row: any) => row.id === item.id ? { ...row, filmed: isFilmed } : row));
+    
+    // Show toast immediately if checked
+    if (isFilmed) {
+      setActiveVeToast({ item });
+    }
+
+    try {
+      // We still set a background loading state if needed, but not block the UI
+      const res = await fetch('/api/reels/filmed', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ code: item.id, filmed: isFilmed })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update filmed status');
+      
+      // Optionally refresh in the background silently
+      refresh(true); // pass true for silent refresh if supported
+    } catch (err: any) {
+      // Revert optimistic update on failure
+      setLiveData((prev: any[]) => prev.map((row: any) => row.id === item.id ? { ...row, filmed: !isFilmed } : row));
+      alert(err.message || "حدث خطأ أثناء التحديث");
+    }
+  };
 
   const handleTagmeToggle = (item: any, sheetLabel: string, isChecked: boolean) => {
     const uniqueKey = 'tgm-' + (item.uniqueKey || generateKey(item));
@@ -1522,7 +4066,19 @@ function App() {
       } else {
         updatedList = prev.filter(i => i.uniqueKey !== uniqueKey);
       }
-      localStorage.setItem('tagme3at_transfers', JSON.stringify(updatedList));
+      
+      const token = session?.access_token || profile?.id;
+      if (token) {
+        if (isChecked && updatedList.length > 0) {
+          const itemToPost = updatedList[0]; // Assuming newTagme is prepended
+          fetch('/api/tagme3at', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(itemToPost) });
+        } else if (!isChecked) {
+          fetch(`/api/tagme3at/${uniqueKey}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+        }
+      }
+
+      syncState('tagme3at_transfers', updatedList, uniqueKey, item.name || 'مهمة محولة', isChecked ? 'tagme_transfer' : 'tagme_untransfer', 
+        isChecked ? `🔄 تم تحويل درس: "${item.name}" إلى التجميعات` : `↩️ تم إلغاء تحويل درس: "${item.name}" من التجميعات`);
       return updatedList;
     });
 
@@ -1558,10 +4114,10 @@ function App() {
   };
 
   const handleToggleMergeSelect = (item: any) => {
-    const key = generateKey(item);
+    const key = item.uniqueKey || generateKey(item);
     setSelectedForMerge(prev => {
-      if (prev.some(i => generateKey(i) === key)) {
-        return prev.filter(i => generateKey(i) !== key);
+      if (prev.some(i => (i.uniqueKey || generateKey(i)) === key)) {
+        return prev.filter(i => (i.uniqueKey || generateKey(i)) !== key);
       }
       return [...prev, item];
     });
@@ -1594,7 +4150,7 @@ function App() {
       const list = prev[stage.gid] || [];
       const updated = [mergedItem, ...list];
       const map = { ...prev, [stage.gid]: updated };
-      localStorage.setItem('youtube_transfers', JSON.stringify(map));
+      syncState('youtube_transfers', map, uniqueKey, combinedNames, 'youtube_merge', `🎬 تم دمج ${selectedForMerge.length} دروس ليوتيوب`);
       return map;
     });
 
@@ -1616,7 +4172,7 @@ function App() {
 
   const handleYoutubeToggle = (item: any, isChecked: boolean) => {
     const stage = getTargetStageGid(item);
-    const uniqueKey = 'yt-' + generateKey(item);
+    const uniqueKey = 'yt-' + (item.uniqueKey || generateKey(item));
 
     setYoutubeItems(prev => {
       const currentList = prev[stage.gid] || [];
@@ -1645,7 +4201,8 @@ function App() {
       }
       
       const updatedMap = { ...prev, [stage.gid]: updatedList };
-      localStorage.setItem('youtube_transfers', JSON.stringify(updatedMap));
+      syncState('youtube_transfers', updatedMap, uniqueKey, item.filingName || item.name || 'يوتيوب', isChecked ? 'youtube_transfer' : 'youtube_untransfer',
+        isChecked ? `▶️ تم نقل درس ليوتيوب: "${item.name}"` : `↩️ تم إلغاء نقل درس اليوتيوب: "${item.name}"`);
       return updatedMap;
     });
 
@@ -1740,6 +4297,14 @@ function App() {
     { label: 'إحصائيات التجميعات 📊', gid: 'analytics_tagme3at', icon: BarChart3, colorHex: '#10b981' },
   ];
 
+  const reelsStages = [
+    { label: 'Shooting', gid: '1436746012', icon: Video, colorHex: '#b49fee' },
+    { label: 'Ve', gid: '1939073164', icon: Video, colorHex: '#92dcf7' },
+    { label: 'CUTS', gid: '0', icon: Video, colorHex: '#ff7843' },
+    { label: 'Counter', gid: '798246690', icon: Video, colorHex: '#ab4bbb' },
+    { label: 'احصائيات الريلز', gid: 'reels-analytics', icon: BarChart3, colorHex: '#818cf8' },
+  ];
+
   const combinedData = useMemo(() => {
     const currentLocal = localEntries[activeGid] || [];
     let baseList = [];
@@ -1774,9 +4339,21 @@ function App() {
       if (assignedBunnyLinks[key] !== undefined) {
         updated.linkBunny = assignedBunnyLinks[key];
       }
+      if (assignedThumbnailLinks[key] !== undefined) {
+        updated.thumbnailLink = assignedThumbnailLinks[key];
+      }
+      if (assignedTimes[key] !== undefined) {
+        updated.time = assignedTimes[key];
+      }
+      if (assignedYoutubeLinks[key] !== undefined) {
+        updated.youtubeLink = assignedYoutubeLinks[key];
+      }
+      if (uploadedStatuses[key] !== undefined) {
+        updated.uploaded = uploadedStatuses[key];
+      }
       return updated;
     });
-  }, [liveData, youtubeItems, tagmeTransfers, localEntries, activeGid, isOperations, isTagme3at, assignedEditors, editorNotes, marketingNotes, assignedOpSheets, assignedBranches, assignedDates, assignedBunnyLinks]);
+  }, [liveData, youtubeItems, tagmeTransfers, localEntries, activeGid, isOperations, isTagme3at, assignedEditors, editorNotes, marketingNotes, assignedOpSheets, assignedBranches, assignedDates, assignedBunnyLinks, assignedThumbnailLinks, assignedTimes, assignedYoutubeLinks, uploadedStatuses]);
 
   useEffect(() => {
     if (combinedData.length === 0) return;
@@ -1822,13 +4399,30 @@ function App() {
         return finalNew;
       });
 
-      newlyAdded.forEach(item => {
+      if (newlyAdded.length === 1) {
+        const item = newlyAdded[0];
         const toastId = 'toast-' + Math.random().toString(36).substr(2, 9);
-        setItemToasts(prev => [...prev, { id: toastId, name: item.name, filingName: item.filingName }]);
+        setItemToasts(prev => [...prev, { 
+          id: toastId, 
+          name: item.name, 
+          filingName: item.filingName, 
+          title: "تنبيه: إضافة درس جديد! 🎉" 
+        }]);
         setTimeout(() => {
           setItemToasts(prev => prev.filter(t => t.id !== toastId));
         }, 8000);
-      });
+      } else if (newlyAdded.length > 1) {
+        const toastId = 'toast-' + Math.random().toString(36).substr(2, 9);
+        setItemToasts(prev => [...prev, { 
+          id: toastId, 
+          name: `تم رصد ${newlyAdded.length} تحديثات جديدة مضافة في الجداول!`, 
+          filingName: '', 
+          title: "تحديثات جديدة متعددة! 🔔" 
+        }]);
+        setTimeout(() => {
+          setItemToasts(prev => prev.filter(t => t.id !== toastId));
+        }, 8000);
+      }
     }
 
     localStorage.setItem(SEEN_KEY, JSON.stringify(Array.from(currentNames)));
@@ -1865,10 +4459,10 @@ function App() {
   }, [yearFilter, teachers, teacherFilter, isOperations]);
 
   const availableWeeks = useMemo(() => {
-    if (isOperations || isTagme3at || isAnalyticsTagme) return [];
+    if (isOperations || isTagme3at || isAnalyticsTagme || isReelsAnalytics) return [];
     const set = new Set(liveData.map((i: any) => i.week ? String(i.week).trim() : '').filter(Boolean));
     return Array.from(set) as string[];
-  }, [liveData, isOperations, isTagme3at, isAnalyticsTagme]);
+  }, [liveData, isOperations, isTagme3at, isAnalyticsTagme, isReelsAnalytics]);
 
 
   const filteredData = useMemo(() => {
@@ -2049,6 +4643,60 @@ function App() {
         <th className="px-3 py-4 text-center th-style">Status</th>
         <th className="px-3 py-4 text-center th-style">Editor Notes</th>
         <th className="px-8 py-4 text-center th-style text-purple-400 font-bold">Priority</th>
+        <th className="px-4 py-4 text-center th-style text-purple-400 font-bold">thumbnail LINK</th>
+        <th className="px-4 py-4 text-center th-style text-purple-400 font-bold">time</th>
+        <th className="px-4 py-4 text-center th-style text-purple-400 font-bold">لينك اليوتيوب</th>
+        <th className="px-4 py-4 text-center th-style text-purple-400 font-bold">UPLOADED?</th>
+      </>
+    );
+    if (activeGid === '0') return ( // CUTS
+      <>
+        <th className="px-4 py-4 text-center th-style"><ColFilter colKey="date" label="Date" /></th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="branch" label="Branch" /></th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="year" label="السنة" /></th>
+        <th className="px-3 py-4 text-center th-style">نوع</th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="creator" label="creator" /></th>
+        <th className="px-4 py-4 text-center th-style">code</th>
+        <th className="px-8 py-4 text-right th-style">DATA FILES</th>
+        <th className="px-8 py-4 text-right th-style">شرح الفكرة والمحتوى</th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="type" label="النوع" /></th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="format" label="المقاس" /></th>
+        <th className="px-5 py-4 text-center th-style">Creator's Notes</th>
+        <th className="px-5 py-4 text-center th-style">Editor's Notes</th>
+        <th className="px-3 py-4 text-center th-style">تفاصيل ناقصة</th>
+        <th className="px-3 py-4 text-center th-style">مشكلة</th>
+        <th className="px-3 py-4 text-center th-style">DONE</th>
+        <th className="px-4 py-4 text-center th-style"><ColFilter colKey="editor" label="Editor" /></th>
+        <th className="px-4 py-4 text-center th-style">Drive Link (Final)</th>
+        <th className="px-3 py-4 text-center th-style">CANCELO</th>
+      </>
+    );
+    if (['1436746012', '1939073164', '798246690'].includes(activeGid)) return ( // Shooting, Ve, Counter
+      <>
+        <th className="px-4 py-4 text-center th-style"><ColFilter colKey="date" label="Date" /></th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="branch" label="Branch" /></th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="year" label="السنة" /></th>
+        <th className="px-4 py-4 text-center th-style"><ColFilter colKey="teacher" label="المدرس" /></th>
+        <th className="px-4 py-4 text-center th-style"><ColFilter colKey="extraName" label="Column 5" /></th>
+        <th className="px-4 py-4 text-center th-style">code</th>
+        <th className="px-8 py-4 text-right th-style">السكريبت</th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="type" label="النوع" /></th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="format" label="المقاس" /></th>
+        <th className="px-3 py-4 text-center th-style">اتصور؟</th>
+        <th className="px-4 py-4 text-center th-style">تاريخ التصوير</th>
+        <th className="px-3 py-4 text-center th-style"><ColFilter colKey="by" label="BY" /></th>
+        <th className="px-4 py-4 text-center th-style"><ColFilter colKey="storage" label="STORAGE" /></th>
+        <th className="px-5 py-4 text-center th-style">NOTES</th>
+        <th className="px-4 py-4 text-center th-style">Drive Link (Raw)</th>
+        {activeGid === '1939073164' && (
+          <>
+            <th className="px-4 py-4 text-center th-style"><ColFilter colKey="editorCol" label="EDITOR" /></th>
+            <th className="px-3 py-4 text-center th-style">تفاصيل ناقصة</th>
+            <th className="px-3 py-4 text-center th-style">DONE?</th>
+            <th className="px-3 py-4 text-center th-style">Cancel</th>
+          </>
+        )}
+        <th className="px-4 py-4 text-center th-style">Drive Link (Final)</th>
       </>
     );
     // Stage tabs
@@ -2066,7 +4714,38 @@ function App() {
     );
   };
 
-  const colSpan = isOperations ? 7 : isTagme3at ? 9 : 7;
+  const { uniqueBranches, uniqueYears, uniqueTeachers, uniqueExtraNames, uniqueTypes, uniqueFormats, uniqueBys, uniqueStorages } = useMemo(() => {
+    const data = Array.isArray(liveData) ? liveData : [];
+    const getUnique = (key: string) => Array.from(new Set(data.map((r: any) => String(r[key] || '').trim()).filter(Boolean))).sort();
+    return {
+      uniqueBranches: ['Alexandria', 'Cairo', 'Desouk'],
+      uniqueYears: getUnique('year'),
+      uniqueTeachers: getUnique('teacher'),
+      uniqueExtraNames: activeGid === '0' ? getUnique('creator') : getUnique('extraName'),
+      uniqueTypes: getUnique('type'),
+      uniqueFormats: getUnique('format'),
+      uniqueBys: getUnique('by'),
+      uniqueStorages: getUnique('storage'),
+    };
+  }, [liveData, activeGid]);
+
+  const yearOptions = useMemo(() => {
+    const list = new Set(['s3', 's2', 's1', 'x']);
+    uniqueYears.forEach(y => {
+      if (y && y.trim()) list.add(y.trim().toLowerCase());
+    });
+    return Array.from(list);
+  }, [uniqueYears]);
+
+  const teacherOptions = useMemo(() => {
+    const list = new Set(['Hossam Elashry', 'Mahmoud Gaber', 'Employee', 'Bishoy']);
+    uniqueTeachers.forEach(t => {
+      if (t && t.trim()) list.add(t.trim());
+    });
+    return Array.from(list);
+  }, [uniqueTeachers]);
+
+  const colSpan = isOperations ? 7 : isTagme3at ? 9 : activeGid === '0' ? 18 : activeGid === '1939073164' ? 20 : ['1436746012', '798246690'].includes(activeGid) ? 16 : 7;
 
   return (
     <div className="flex min-h-screen bg-[#05070a] text-foreground selection:bg-primary/30">
@@ -2093,7 +4772,8 @@ function App() {
               <div className={`w-4 h-4 rounded-full bg-white transition-transform duration-300 ${colorfulTabs ? 'translate-x-5' : 'translate-x-0'}`} />
             </button>
           </div>
-          {stages.filter(stage => !profile?.role || PERMISSIONS.canViewTab(profile.role, stage.label, profile.allowed_tabs || [])).map((stage) => (
+          {/* Top Static Tabs */}
+          {stages.filter(s => s.gid === '1476192399' || s.gid === '1535230545').filter(stage => !profile?.role || PERMISSIONS.canViewTab(profile.role, stage.label, profile.allowed_tabs || [])).map((stage) => (
             <SidebarItem
               key={stage.gid}
               icon={stage.icon}
@@ -2113,6 +4793,90 @@ function App() {
               }}
             />
           ))}
+
+          {/* Mode Toggle Button */}
+          <div className="mt-2 mb-4 px-1">
+            <button
+              onClick={() => {
+                const newMode = appMode === 'OP' ? 'REELS' : 'OP';
+                setAppMode(newMode);
+                // Optionally auto-select the first tab of the new mode
+                if (newMode === 'REELS') {
+                  setActiveGid('1436746012');
+                  setActiveLabel('Shooting');
+                } else {
+                  setActiveGid('497207661');
+                  setActiveLabel('Junior 4');
+                }
+              }}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-300 group
+                ${appMode === 'REELS' 
+                  ? 'bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.15)]' 
+                  : 'bg-[#1a1c23] border-white/5 hover:border-white/10'}`}
+            >
+              <div className="flex items-center gap-3">
+                <div className={`p-1.5 rounded-lg transition-colors ${appMode === 'REELS' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/60 group-hover:text-white/80'}`}>
+                  {appMode === 'REELS' ? <Video size={16} /> : <FolderOpen size={16} />}
+                </div>
+                <span className={`text-[11px] font-black uppercase tracking-[0.2em] transition-colors duration-300 ${appMode === 'REELS' ? 'text-emerald-400' : 'text-white/60 group-hover:text-white/80'}`}>
+                  {appMode === 'REELS' ? 'REELS MODE' : 'OP MODE'}
+                </span>
+              </div>
+              <div className={`w-10 h-5 rounded-full p-1 transition-colors duration-300 ${appMode === 'REELS' ? 'bg-emerald-500' : 'bg-white/10'}`}>
+                <div className={`w-3 h-3 rounded-full bg-white transition-transform duration-300 ${appMode === 'REELS' ? 'translate-x-5' : 'translate-x-0'}`} />
+              </div>
+            </button>
+          </div>
+
+          {/* Dynamic Tabs based on Mode */}
+          <div className="flex flex-col gap-1">
+            {(appMode === 'OP' ? stages.filter(s => s.gid !== '1476192399' && s.gid !== '1535230545' && s.gid !== 'analytics_tagme3at') : reelsStages)
+              .filter(stage => !profile?.role || PERMISSIONS.canViewTab(profile.role, stage.label, profile.allowed_tabs || []))
+              .map((stage) => (
+              <SidebarItem
+                key={stage.gid}
+                icon={stage.icon}
+                label={stage.label}
+                colorHex={stage.colorHex}
+                colorful={colorfulTabs}
+                active={activeGid === stage.gid}
+                onClick={() => {
+                  setActiveGid(stage.gid);
+                  setActiveLabel(stage.label);
+                  setStatusFilter('All');
+                  setTeacherFilter('All');
+                  setYearFilter('All');
+                  setStageWeekFilter('All');
+                  setColFilters({});
+                  setSearchQuery('');
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Bottom Static Tabs (Analytics) */}
+          <div className="mt-4">
+            {stages.filter(s => s.gid === 'analytics_tagme3at').filter(stage => !profile?.role || PERMISSIONS.canViewTab(profile.role, stage.label, profile.allowed_tabs || [])).map((stage) => (
+              <SidebarItem
+                key={stage.gid}
+                icon={stage.icon}
+                label={stage.label}
+                colorHex={stage.colorHex}
+                colorful={colorfulTabs}
+                active={activeGid === stage.gid}
+                onClick={() => {
+                  setActiveGid(stage.gid);
+                  setActiveLabel(stage.label);
+                  setStatusFilter('All');
+                  setTeacherFilter('All');
+                  setYearFilter('All');
+                  setStageWeekFilter('All');
+                  setColFilters({});
+                  setSearchQuery('');
+                }}
+              />
+            ))}
+          </div>
           {/* Users tab for admin and manager */}
           {profile?.role && PERMISSIONS.canManageUsers(profile.role) && (
             <SidebarItem
@@ -2212,9 +4976,20 @@ function App() {
                               <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
                                 n.type === 'done' ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' :
                                 n.type === 'cancel' ? 'bg-rose-500/15 border-rose-500/30 text-rose-400' :
+                                n.type === 'new_entry' ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' :
+                                n.type === 'tagme_transfer' ? 'bg-purple-500/15 border-purple-500/30 text-purple-400' :
+                                n.type === 'subscribe' ? 'bg-rose-500/15 border-rose-500/30 text-rose-400' :
+                                n.type === 'unsubscribe' ? 'bg-white/5 border-white/10 text-muted' :
                                 'bg-blue-500/15 border-blue-500/30 text-blue-400'
                               }`}>
-                                {n.type === 'done' ? '✅ مكتملة' : n.type === 'cancel' ? '❌ ملغاة' : n.type === 'undone' ? '↩️ تراجع' : '📝 ملاحظة'}
+                                {n.type === 'done' ? '✅ مكتملة' : 
+                                 n.type === 'cancel' ? '❌ ملغاة' : 
+                                 n.type === 'undone' ? '↩️ تراجع' : 
+                                 n.type === 'new_entry' ? '🆕 مهمة جديدة' :
+                                 n.type === 'tagme_transfer' ? '🔄 تحويل' :
+                                 n.type === 'subscribe' ? '🔔 متابعة' :
+                                 n.type === 'unsubscribe' ? '🔕 إلغاء متابعة' :
+                                 '📝 ملاحظة'}
                               </span>
                               <span className="text-[10px] text-muted">من: {n.from}</span>
                             </div>
@@ -2281,9 +5056,16 @@ function App() {
                 <span>Synchronize</span>
               </button>
             )}
-            {profile?.role && PERMISSIONS.canAddEntry(profile.role) && (
+            {profile?.role && (activeGid === '1436746012' || activeGid === '0' || PERMISSIONS.canAddEntry(profile.role)) && (
               <button
-                onClick={() => setShowAddModal(true)}
+                onClick={() => {
+                  if (activeGid === '0') {
+                    setShootingAddForm(prev => ({ ...prev, type: 'CUT' }));
+                  } else {
+                    setShootingAddForm(prev => ({ ...prev, type: 'حواري' }));
+                  }
+                  setShowAddModal(true);
+                }}
                 className="btn-primary px-8 py-3.5 rounded-2xl flex items-center gap-3 text-xs font-black uppercase tracking-widest shadow-2xl cursor-pointer hover:scale-105 active:scale-95 transition-all"
               >
                 <Plus size={20} />
@@ -2309,8 +5091,12 @@ function App() {
                       <Plus size={20} />
                     </div>
                     <div>
-                      <h3 className="text-xl font-black text-white arabic-text">إضافة درس / عملية جديدة</h3>
-                      <p className="text-xs text-muted">سيتم إضافته فورياً إلى شيت [{activeLabel}]</p>
+                      <h3 className="text-xl font-black text-white arabic-text">
+                        {activeGid === '0' ? 'إضافة ريل / مهمة قطع جديدة' : 'إضافة درس / عملية جديدة'}
+                      </h3>
+                      <p className="text-xs text-muted">
+                        سيتم إضافته فورياً إلى شيت [{['1436746012', '1939073164', '798246690'].includes(activeGid) ? 'Shooting' : activeGid === '0' ? 'Cuts' : activeLabel}]
+                      </p>
                     </div>
                   </div>
                   <button onClick={() => setShowAddModal(false)} className="text-muted hover:text-white p-2 transition-colors cursor-pointer">
@@ -2319,76 +5105,194 @@ function App() {
                 </div>
 
                 <form onSubmit={handleAddSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">اسم الدرس / العملية *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="مثال: الوحدة الرابعة - مراجعة عامة..."
-                      value={addForm.name}
-                      onChange={e => setAddForm({...addForm, name: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
-                    />
-                  </div>
+                  {['1436746012', '1939073164', '798246690', '0'].includes(activeGid) ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">الفرع (Branch)</label>
+                          <select
+                            value={shootingAddForm.branch}
+                            onChange={e => setShootingAddForm({...shootingAddForm, branch: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
+                          >
+                            <option value="Alexandria" className="bg-[#0b1019]">Alexandria</option>
+                            <option value="Desouk" className="bg-[#0b1019]">Desouk</option>
+                            <option value="Cairo" className="bg-[#0b1019]">Cairo</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">السنة (Year)</label>
+                          <select
+                            value={shootingAddForm.year}
+                            onChange={e => setShootingAddForm({...shootingAddForm, year: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
+                          >
+                            {yearOptions.map(y => (
+                              <option key={y} value={y} className="bg-[#0b1019]">{y.toUpperCase()}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">التاريخ / المعرف</label>
-                      <input
-                        type="text"
-                        placeholder="مثال: 4/25/2026"
-                        value={addForm.id}
-                        onChange={e => setAddForm({...addForm, id: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-mono text-sm text-left"
-                        dir="ltr"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">المادة / التصنيف</label>
-                      <input
-                        type="text"
-                        placeholder="مثال: لغة عربية"
-                        value={addForm.subject}
-                        onChange={e => setAddForm({...addForm, subject: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
-                      />
-                    </div>
-                  </div>
+                      <div className="grid grid-cols-2 gap-4 items-end">
+                        {activeGid !== '0' ? (
+                          <>
+                            <div className="relative">
+                              <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">المدرس (Teacher)</label>
+                              <InlineCombobox
+                                options={teacherOptions}
+                                value={shootingAddForm.teacher}
+                                onChange={(val: string) => setShootingAddForm({...shootingAddForm, teacher: val})}
+                                placeholder="اختر أو ضف مدرس"
+                              />
+                            </div>
+                            <div className="relative">
+                              <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">اسم إضافي (Extra Name)</label>
+                              <InlineCombobox
+                                options={uniqueExtraNames}
+                                value={shootingAddForm.extraName}
+                                onChange={(val: string) => setShootingAddForm({...shootingAddForm, extraName: val})}
+                                placeholder="اختر أو ضف اسم إضافي"
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <div className="relative col-span-2">
+                            <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">المنشئ / المصور (Creator)</label>
+                            <InlineCombobox
+                              options={uniqueExtraNames}
+                              value={shootingAddForm.extraName}
+                              onChange={(val: string) => setShootingAddForm({...shootingAddForm, extraName: val})}
+                              placeholder="اختر أو ضف اسم المنشئ"
+                            />
+                          </div>
+                        )}
+                      </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">الفرع / النطاق</label>
-                      <input
-                        type="text"
-                        placeholder="مثال: القاهرة"
-                        value={addForm.extra}
-                        onChange={e => setAddForm({...addForm, extra: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">المحرر / المدرس</label>
-                      <input
-                        type="text"
-                        placeholder="اسم المونتير أو المدرس"
-                        value={addForm.editor}
-                        onChange={e => setAddForm({...addForm, editor: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
-                      />
-                    </div>
-                  </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">النوع (Type)</label>
+                          <input
+                            type="text"
+                            value={shootingAddForm.type}
+                            onChange={e => setShootingAddForm({...shootingAddForm, type: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">المقاس (Format)</label>
+                          <input
+                            type="text"
+                            value={shootingAddForm.format}
+                            onChange={e => setShootingAddForm({...shootingAddForm, format: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold text-sm"
+                          />
+                        </div>
+                      </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">كود العملية (OP NAME) / تفاصيل إضافية</label>
-                    <input
-                      type="text"
-                      placeholder="J4-T2-U3-..."
-                      value={addForm.filingName}
-                      onChange={e => setAddForm({...addForm, filingName: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-mono text-xs text-left"
-                      dir="ltr"
-                    />
-                  </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">اسم السكريبت (Script Name)</label>
+                          <input
+                            type="text"
+                            placeholder="مثال: سكريبت مستر حسام"
+                            value={shootingAddForm.scriptName}
+                            onChange={e => setShootingAddForm({...shootingAddForm, scriptName: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">رابط السكريبت (Script Link)</label>
+                          <input
+                            type="url"
+                            placeholder="https://docs.google.com/..."
+                            value={shootingAddForm.scriptLink || ''}
+                            onChange={e => setShootingAddForm({...shootingAddForm, scriptLink: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold text-sm"
+                            dir="ltr"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-primary/10 border border-primary/20 rounded-xl mt-4">
+                        <label className="block text-xs font-bold text-primary mb-1.5 arabic-text">الكود المتولد تلقائياً (Code)</label>
+                        <div className="font-mono text-lg text-white" dir="ltr">{generatedCode || 'جاري الحساب...'}</div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">اسم الدرس / العملية *</label>
+                        <input
+                          type="text"
+                          required={activeGid !== '1436746012'}
+                          placeholder="مثال: الوحدة الرابعة - مراجعة عامة..."
+                          value={addForm.name}
+                          onChange={e => setAddForm({...addForm, name: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">التاريخ / المعرف</label>
+                          <input
+                            type="text"
+                            placeholder="مثال: 4/25/2026"
+                            value={addForm.id}
+                            onChange={e => setAddForm({...addForm, id: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-mono text-sm text-left"
+                            dir="ltr"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">المادة / التصنيف</label>
+                          <input
+                            type="text"
+                            placeholder="مثال: لغة عربية"
+                            value={addForm.subject}
+                            onChange={e => setAddForm({...addForm, subject: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">الفرع / النطاق</label>
+                          <input
+                            type="text"
+                            placeholder="مثال: القاهرة"
+                            value={addForm.extra}
+                            onChange={e => setAddForm({...addForm, extra: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">المحرر / المدرس</label>
+                          <input
+                            type="text"
+                            placeholder="اسم المونتير أو المدرس"
+                            value={addForm.editor}
+                            onChange={e => setAddForm({...addForm, editor: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-bold arabic-text text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-muted mb-1.5 arabic-text">كود العملية (OP NAME) / تفاصيل إضافية</label>
+                        <input
+                          type="text"
+                          placeholder="J4-T2-U3-..."
+                          value={addForm.filingName}
+                          onChange={e => setAddForm({...addForm, filingName: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors font-mono text-xs text-left"
+                          dir="ltr"
+                        />
+                      </div>
+                    </>
+                  )}
 
                   <div className="pt-4 flex justify-end gap-3">
                     <button
@@ -2400,7 +5304,8 @@ function App() {
                     </button>
                     <button
                       type="submit"
-                      className="px-8 py-3 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold arabic-text text-xs shadow-lg shadow-primary/30 transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center gap-2"
+                      disabled={loading || (activeGid === '1436746012' && !generatedCode)}
+                      className="px-8 py-3 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold arabic-text text-xs shadow-lg shadow-primary/30 transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <span>حفظ وإضافة 🚀</span>
                     </button>
@@ -2533,7 +5438,7 @@ function App() {
           </div>
 
           {/* Week Filter Pills Bar (For Stage Sheets) */}
-          {isStage && availableWeeks.length > 0 && (
+          {isStage && !isReelsStage && availableWeeks.length > 0 && (
             <div className="flex flex-wrap gap-2.5 items-center bg-white/[0.02] border border-white/[0.05] p-3.5 rounded-2xl animate-fadeIn shadow-lg" dir="rtl">
               <span className="text-xs font-black text-muted ml-2">📌 تصفية بالأسبوع:</span>
               <button
@@ -2564,8 +5469,10 @@ function App() {
           )}
 
           {/* Main Content View (Table vs Analytics) */}
-          {isAnalyticsTagme ? (
-            <TagmeAnalyticsDashboard liveData={liveData} tagmeTransfers={tagmeTransfers} loading={loading} />
+          {isReelsAnalytics ? (
+            <ReelsAnalytics />
+          ) : isAnalyticsTagme ? (
+            <TagmeAnalyticsDashboard combinedData={combinedData} tagmeTransfers={tagmeTransfers} loading={loading} taskStatuses={taskStatuses} taskPriorities={taskPriorities} />
           ) : (
             <div className="table-container">
               <div className="overflow-x-auto">
@@ -2576,6 +5483,32 @@ function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/[0.03]">
+                    {/* Quick-Add Row for Reels Sheets GIDs */}
+                    {['1436746012', '798246690', '0'].includes(activeGid) && profile?.role && (activeGid === '1436746012' || activeGid === '0' || PERMISSIONS.canAddEntry(profile.role)) && !loading && (
+                      <tr 
+                        onClick={() => {
+                          if (activeGid === '0') {
+                            setShootingAddForm(prev => ({ ...prev, type: 'CUT' }));
+                          } else {
+                            setShootingAddForm(prev => ({ ...prev, type: 'حواري' }));
+                          }
+                          setShowAddModal(true);
+                        }}
+                        className="border-b border-white/[0.05] bg-primary/[0.02] hover:bg-primary/[0.08] transition-colors cursor-pointer group"
+                      >
+                        <td className="px-4 py-3.5 text-center">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 group-hover:bg-primary/20 text-primary flex items-center justify-center mx-auto transition-all scale-100 group-hover:scale-110 shadow-sm">
+                            <Plus size={16} className="stroke-[3]" />
+                          </div>
+                        </td>
+                        <td colSpan={colSpan - 1} className="px-4 py-3.5 text-right arabic-text">
+                          <span className="text-xs font-black text-primary/80 group-hover:text-primary transition-colors tracking-wide font-black">
+                            {activeGid === '0' ? '+ إضافة ريل جديد (Add New Cut Task)' : '+ إضافة اسكريبت جديد (Add New Script Task)'}
+                          </span>
+                        </td>
+                      </tr>
+                    )}
+
                     <AnimatePresence mode="popLayout">
                       {loading ? (
                         <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -2613,7 +5546,7 @@ function App() {
                           </div>
                         </td>
                       </motion.tr>
-                    ) : filteredData.length > 0 ? filteredData.slice(0, 200).map((item: any, idx: number) => {
+                    ) : filteredData.length > 0 ? filteredData.slice(0, visibleRecordsLimit).map((item: any, idx: number) => {
                       const itemKey = item.uniqueKey || generateKey(item);
                       const isGlowing = glowingKeys.includes(itemKey);
 
@@ -2634,18 +5567,38 @@ function App() {
                         );
                       }
                       if (isTagme3at) {
-                        const isJunior = profile?.role === 'junior';
-                        const today = new Date().toDateString();
-                        const myCountToday = combinedData.filter((i: any) =>
-                          (String(i.priority) === 'true' || i.priority === true) &&
-                          String(i.editor || '').toLowerCase() === String(profile?.name || '').toLowerCase() &&
-                          new Date(i.updated_at || i.date || Date.now()).toDateString() === today
-                        ).length;
-                        const limit = Number(rolePermissions?.junior?.dailyPriorityLimit ?? 1);
-                        const canRaisePriority = !isJunior || myCountToday < limit;
+                        // Priority limit: max 10 priority tasks per sheet per day (global, not per user)
+                        const DAILY_PRIORITY_LIMIT = 10;
+                        const totalPriorityToday = Object.values(taskPriorities).filter(v => v === true).length +
+                          combinedData.filter((i: any) =>
+                            (String(i.priority) === 'true' || i.priority === true) &&
+                            !taskPriorities.hasOwnProperty(i.uniqueKey || generateKey(i))
+                          ).length;
+                        const canRaisePriority = totalPriorityToday < DAILY_PRIORITY_LIMIT;
                         const key = item.uniqueKey || generateKey(item);
                         const isSubscribed = subscribedTasks.includes(key) || (item.editor && item.editor.toLowerCase() === profile?.name?.toLowerCase());
-                        return <TagmeRow key={idx} item={item} index={idx} onUpdateEditor={handleUpdateEditor} editorsList={editorsList} onUpdateEditorNotes={handleUpdateEditorNotes} onUpdateMarketingNotes={handleUpdateMarketingNotes} opSheetsList={opSheetsList} branchesList={branchesList} onUpdateOpSheet={handleUpdateOpSheet} onUpdateBranch={handleUpdateBranch} onUpdateDate={handleUpdateDate} isGlowing={isGlowing} liveData={liveData} canRaisePriority={canRaisePriority} priorityLimit={limit} onStatusChange={handleStatusChange} isSubscribed={isSubscribed} onToggleSubscribe={() => toggleSubscribe(key)} priorityOverride={taskPriorities[key]} statusOverride={taskStatuses[key]} />;
+                        return <TagmeRow key={idx} item={item} index={idx} onUpdateEditor={handleUpdateEditor} editorsList={editorsList} onUpdateEditorNotes={handleUpdateEditorNotes} onUpdateMarketingNotes={handleUpdateMarketingNotes} opSheetsList={opSheetsList} branchesList={branchesList} onUpdateOpSheet={handleUpdateOpSheet} onUpdateBranch={handleUpdateBranch} onUpdateDate={handleUpdateDate} isGlowing={isGlowing} liveData={liveData} canRaisePriority={canRaisePriority || (taskPriorities[key] === true)} priorityLimit={DAILY_PRIORITY_LIMIT} onStatusChange={handleStatusChange} isSubscribed={isSubscribed} onToggleSubscribe={() => toggleSubscribe(key)} priorityOverride={taskPriorities[key]} statusOverride={taskStatuses[key]} onUpdateThumbnailLink={handleUpdateThumbnailLink} onUpdateTime={handleUpdateTime} onUpdateYoutubeLink={handleUpdateYoutubeLink} onUpdateUploaded={handleUpdateUploaded} />;
+                      }
+                      if (activeGid === '0') {
+                        return <CutsRow 
+                          key={idx} 
+                          item={item} 
+                          index={idx} 
+                          onUpdateShootingRow={handleUpdateShootingRow}
+                          liveData={liveData} 
+                          optionsLists={{ branches: uniqueBranches, years: uniqueYears, types: uniqueTypes, formats: uniqueFormats, editors: editorsList, extraNames: uniqueExtraNames }} 
+                          autofillDrag={autofillDrag} 
+                          setAutofillDrag={setAutofillDrag} 
+                          onApplyAutofill={handleApplyAutofill} 
+                          activeCell={activeCell} 
+                          setActiveCell={setActiveCell} 
+                          toast={toast}
+                          isSubscribed={subscribedTasks.includes(item.id)}
+                          onToggleSubscribe={toggleSubscribe}
+                        />;
+                      }
+                      if (['1436746012', '1939073164', '798246690'].includes(activeGid)) {
+                        return <ShootingRow key={idx} item={item} index={idx} activeGid={activeGid} onToggleFilmed={handleFilmedToggle} loadingFilmedCode={loadingFilmedCode} onUpdateShootingRow={handleUpdateShootingRow} liveData={liveData} optionsLists={{ branches: uniqueBranches, years: uniqueYears, teachers: uniqueTeachers, extraNames: uniqueExtraNames, types: uniqueTypes, formats: uniqueFormats, bys: uniqueBys, storages: uniqueStorages, editors: editorsList }} autofillDrag={autofillDrag} setAutofillDrag={setAutofillDrag} onApplyAutofill={handleApplyAutofill} activeCell={activeCell} setActiveCell={setActiveCell} toast={toast} isSubscribed={subscribedTasks.includes(item.id)} onToggleSubscribe={toggleSubscribe} />;
                       }
                       return <StageRow key={idx} item={item} index={idx} tagmeTransfers={tagmeTransfers} onTagmeToggle={handleTagmeToggle} activeLabel={activeLabel} isGlowing={isGlowing} />;
                     }) : (
@@ -2657,12 +5610,21 @@ function App() {
                       </motion.tr>
                     )}
                   </AnimatePresence>
-                  {filteredData.length > 200 && !(isOperations && teacherFilter === 'All') && (
+                  {filteredData.length > visibleRecordsLimit && !(isOperations && teacherFilter === 'All') && (
                     <tr>
-                      <td colSpan={colSpan} className="py-8 text-center">
-                        <p className="text-xs text-muted font-bold uppercase tracking-widest">
-                          Showing 200 of {filteredData.length} records. Please use search or filters to find specific entries.
-                        </p>
+                      <td colSpan={colSpan} className="py-10 text-center">
+                        <div className="flex flex-col items-center justify-center gap-4 animate-fadeIn">
+                          <p className="text-xs text-muted font-bold uppercase tracking-widest arabic-text">
+                            تم عرض {visibleRecordsLimit} من إجمالي {filteredData.length} سجل. يرجى استخدام البحث أو الفلاتر، أو اضغط أدناه لعرض المزيد:
+                          </p>
+                          <button
+                            onClick={() => setVisibleRecordsLimit(prev => prev + 200)}
+                            className="px-8 py-3.5 bg-primary/10 hover:bg-primary text-primary hover:text-white border border-primary/30 rounded-2xl text-xs font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-lg hover:shadow-primary/20 flex items-center gap-2"
+                          >
+                            <Sparkles size={16} />
+                            <span>عرض المزيد (Load More +200)</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )}
@@ -2688,7 +5650,8 @@ function App() {
                 </div>
                 <div className="flex flex-col text-right" dir="rtl">
                   <span className="text-base font-bold text-white arabic-text">تم تحديد عدة دروس لتجميعها معاً في يوتيوب 🔗</span>
-                  <span className="text-xs text-purple-300 arabic-text line-clamp-1 mt-0.5">{selectedForMerge.map(i => i.name).join(' + ')}</span>
+                  <span className="text-xs text-emerald-400 font-bold arabic-text mt-1">{calculateTotalDuration(selectedForMerge)}</span>
+                  <span className="text-[10px] text-purple-300 arabic-text line-clamp-1 mt-0.5">{selectedForMerge.map(i => i.name).join(' + ')}</span>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -2775,6 +5738,44 @@ function App() {
               </div>
             </motion.div>
           )}
+
+          {activeVeToast && (
+            <motion.div
+              initial={{ opacity: 0, y: 50, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 50, scale: 0.9 }}
+              className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[150] bg-gradient-to-r from-[#061e14] via-[#092e1e] to-[#061e14] border-2 border-emerald-500/50 px-8 py-5 rounded-2xl shadow-[0_0_50px_rgba(16,185,129,0.5)] flex items-center gap-8 max-w-2xl w-full justify-between text-white"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 animate-pulse shrink-0">
+                  <CheckCircle2 size={32} />
+                </div>
+                <div className="flex flex-col text-right" dir="rtl">
+                  <span className="text-sm font-bold text-white arabic-text">تم النسخ إلى [شيت VE] بنجاح! 🚀</span>
+                  <span className="text-xs text-emerald-300 arabic-text line-clamp-1 mt-0.5">{activeVeToast.item.id}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <button
+                  onClick={() => {
+                    setActiveGid('1939073164');
+                    setActiveLabel('Ve');
+                    setActiveVeToast(null);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-6 py-3 rounded-xl shadow-lg shadow-emerald-600/50 flex items-center gap-2 transition-all hover:scale-105 active:scale-95 whitespace-nowrap cursor-pointer"
+                >
+                  <span>الانتقال للشيت</span>
+                  <ChevronRight size={16} />
+                </button>
+                <button
+                  onClick={() => setActiveVeToast(null)}
+                  className="text-muted hover:text-white p-2 transition-colors cursor-pointer"
+                >
+                  <XCircle size={20} />
+                </button>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {/* Floating new item toasts container */}
@@ -2796,7 +5797,7 @@ function App() {
                 </div>
                 
                 <div className="flex-1 min-w-0 text-right space-y-1">
-                  <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-wider">تمت إضافة درس جديد! 🎉</h4>
+                  <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-wider">{toast.title || "تمت إضافة درس جديد! 🎉"}</h4>
                   <p className="text-xs font-bold text-white leading-relaxed line-clamp-2 arabic-text">{toast.name}</p>
                   {toast.filingName && (
                     <p className="text-[9px] font-mono text-muted/60 truncate uppercase tracking-wider">{toast.filingName}</p>
@@ -3023,3 +6024,4 @@ function RootApp() {
 export default function Root() {
   return <RootApp />;
 }
+

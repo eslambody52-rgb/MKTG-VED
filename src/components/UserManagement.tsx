@@ -13,16 +13,26 @@ const ALL_TABS = [
   'Middle 1', 'Middle 2', 'Middle 3', 'Senior 1', 'Senior 2', 'Senior 3'
 ];
 
-const AvatarInitials = ({ name, role }: { name: string; role: Role }) => {
+const AvatarInitials = ({ name, role, team }: { name: string; role: Role; team?: string }) => {
   const colors: Record<Role, string> = {
     admin: 'from-rose-600 to-pink-600',
-    manager: 'from-purple-600 to-violet-600',
+    manager: 'from-yellow-500 via-amber-500 to-yellow-600 shadow-[0_0_15px_rgba(245,158,11,0.4)] border border-yellow-400/30',
     supervisor: 'from-blue-600 to-cyan-600',
     junior: 'from-emerald-600 to-teal-600',
   };
+
+  let bgGradient = colors[role];
+  if (role === 'manager') {
+    bgGradient = 'from-yellow-500 via-amber-500 to-yellow-600 shadow-[0_0_15px_rgba(245,158,11,0.4)] border border-yellow-400/30';
+  } else if (team === 'video') {
+    bgGradient = 'from-emerald-500 to-teal-600';
+  } else if (team === 'marketing') {
+    bgGradient = 'from-purple-500 to-violet-600';
+  }
+
   const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
   return (
-    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${colors[role]} flex items-center justify-center text-white text-sm font-black shadow-lg shrink-0`}>
+    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${bgGradient} flex items-center justify-center text-white text-sm font-black shadow-lg shrink-0`}>
       {initials}
     </div>
   );
@@ -30,13 +40,15 @@ const AvatarInitials = ({ name, role }: { name: string; role: Role }) => {
 
 interface EditUserModalProps {
   user: UserProfile;
+  initialTeam: 'marketing' | 'video' | '';
   onClose: () => void;
-  onSave: (id: string, updates: Partial<UserProfile>) => Promise<void>;
+  onSave: (id: string, updates: Partial<UserProfile>, team: 'marketing' | 'video' | '') => Promise<void>;
 }
 
-const EditUserModal = ({ user, onClose, onSave }: EditUserModalProps) => {
+const EditUserModal = ({ user, initialTeam, onClose, onSave }: EditUserModalProps) => {
   const [role, setRole] = useState<Role>(user.role);
   const [allowedTabs, setAllowedTabs] = useState<string[]>(user.allowed_tabs || []);
+  const [selectedTeam, setSelectedTeam] = useState<'marketing' | 'video' | ''>(initialTeam);
   const [saving, setSaving] = useState(false);
 
   const toggleTab = (tab: string) => {
@@ -47,7 +59,7 @@ const EditUserModal = ({ user, onClose, onSave }: EditUserModalProps) => {
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(user.id, { role, allowed_tabs: role === 'supervisor' ? allowedTabs : [] });
+    await onSave(user.id, { role, allowed_tabs: role === 'supervisor' ? allowedTabs : [] }, selectedTeam);
     setSaving(false);
     onClose();
   };
@@ -70,7 +82,6 @@ const EditUserModal = ({ user, onClose, onSave }: EditUserModalProps) => {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h3 className="text-lg font-black text-white arabic-text">تعديل المستخدم</h3>
-            <p className="text-xs text-white/40 mt-0.5">{user.email}</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all cursor-pointer">
             <X size={16} />
@@ -79,10 +90,9 @@ const EditUserModal = ({ user, onClose, onSave }: EditUserModalProps) => {
 
         {/* User info */}
         <div className="flex items-center gap-3 mb-6 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
-          <AvatarInitials name={user.name} role={role} />
+          <AvatarInitials name={user.name} role={role} team={selectedTeam} />
           <div>
             <p className="text-sm font-bold text-white arabic-text">{user.name}</p>
-            <p className="text-xs text-white/40">{user.email}</p>
           </div>
         </div>
 
@@ -103,6 +113,43 @@ const EditUserModal = ({ user, onClose, onSave }: EditUserModalProps) => {
                 {ROLE_LABELS[r]}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Team Selector */}
+        <div className="mb-5">
+          <label className="text-[11px] font-black text-white/50 uppercase tracking-widest mb-2 block">فريق العمل (Team)</label>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              onClick={() => setSelectedTeam('')}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                !selectedTeam
+                  ? 'bg-white/10 border-white/20 text-white'
+                  : 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10'
+              }`}
+            >
+              بلا فريق
+            </button>
+            <button
+              onClick={() => setSelectedTeam('video')}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                selectedTeam === 'video'
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 ring-2 ring-emerald-500/30'
+                  : 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10'
+              }`}
+            >
+              فريق الفيديو
+            </button>
+            <button
+              onClick={() => setSelectedTeam('marketing')}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                selectedTeam === 'marketing'
+                  ? 'bg-purple-500/20 border-purple-500/40 text-purple-300 ring-2 ring-purple-500/30'
+                  : 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10'
+              }`}
+            >
+              فريق الماركتينج
+            </button>
           </div>
         </div>
 
@@ -172,7 +219,7 @@ const EditUserModal = ({ user, onClose, onSave }: EditUserModalProps) => {
 
 interface InviteModalProps {
   onClose: () => void;
-  onInvite: (email: string, name: string, role: Role, password: string) => Promise<string | null>;
+  onInvite: (email: string, name: string, role: Role, password: string, team: 'marketing' | 'video' | '') => Promise<string | null>;
 }
 
 const InviteModal = ({ onClose, onInvite }: InviteModalProps) => {
@@ -180,6 +227,7 @@ const InviteModal = ({ onClose, onInvite }: InviteModalProps) => {
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('junior');
   const [password, setPassword] = useState('');
+  const [team, setTeam] = useState<'marketing' | 'video' | ''>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -188,7 +236,7 @@ const InviteModal = ({ onClose, onInvite }: InviteModalProps) => {
     if (password.length < 6) { setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); return; }
     setError('');
     setLoading(true);
-    const err = await onInvite(email, name, role, password);
+    const err = await onInvite(email, name, role, password, team);
     setLoading(false);
     if (err) { setError(err); } else { onClose(); }
   };
@@ -221,8 +269,8 @@ const InviteModal = ({ onClose, onInvite }: InviteModalProps) => {
               className="w-full px-4 py-3 rounded-xl bg-white/[0.05] border border-white/[0.1] text-white text-sm font-medium focus:outline-none focus:border-purple-500/60 transition-all placeholder-white/25" />
           </div>
           <div>
-            <label className="text-[11px] font-black text-white/50 uppercase tracking-widest mb-1.5 block">??????? ?? ??? ??????</label>
-            <input type="text" value={email} onChange={e => setEmail(e.target.value)} placeholder="adham ?? adham@company.com"
+            <label className="text-[11px] font-black text-white/50 uppercase tracking-widest mb-1.5 block">اسم المستخدم أو البريد</label>
+            <input type="text" value={email} onChange={e => setEmail(e.target.value)} placeholder="adham أو adham@company.com"
               className="w-full px-4 py-3 rounded-xl bg-white/[0.05] border border-white/[0.1] text-white text-sm font-medium focus:outline-none focus:border-purple-500/60 transition-all placeholder-white/25" />
           </div>
           <div>
@@ -239,6 +287,23 @@ const InviteModal = ({ onClose, onInvite }: InviteModalProps) => {
                   {ROLE_LABELS[r]}
                 </button>
               ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] font-black text-white/50 uppercase tracking-widest mb-1.5 block">فريق العمل (Team)</label>
+            <div className="grid grid-cols-3 gap-2">
+              <button key="no-team" type="button" onClick={() => setTeam('')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${!team ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10'}`}>
+                بلا فريق
+              </button>
+              <button key="video-team" type="button" onClick={() => setTeam('video')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${team === 'video' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 ring-2 ring-emerald-500/30' : 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10'}`}>
+                فريق الفيديو
+              </button>
+              <button key="marketing-team" type="button" onClick={() => setTeam('marketing')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${team === 'marketing' ? 'bg-purple-500/20 border-purple-500/40 text-purple-300 ring-2 ring-purple-500/30' : 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10'}`}>
+                فريق الماركتينج
+              </button>
             </div>
           </div>
 
@@ -269,6 +334,7 @@ const InviteModal = ({ onClose, onInvite }: InviteModalProps) => {
 export const UserManagement = () => {
   const { profile, session } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [userTeams, setUserTeams] = useState<{ [userId: string]: 'marketing' | 'video' | '' }>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
@@ -287,6 +353,11 @@ export const UserManagement = () => {
     const data = await res.json().catch(() => ({}));
     if (res.ok && Array.isArray(data.users)) {
       setUsers(data.users as UserProfile[]);
+      const teamsMap: Record<string, 'marketing' | 'video' | ''> = {};
+      data.users.forEach((u: UserProfile) => {
+        teamsMap[u.id] = u.team || '';
+      });
+      setUserTeams(teamsMap);
     } else {
       setUsers([]);
     }
@@ -310,6 +381,18 @@ export const UserManagement = () => {
     }
   };
 
+  const fetchUserTeams = async () => {
+    const res = await fetch('/api/user-teams', {
+      headers: {
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.teams) {
+      setUserTeams(data.teams);
+    }
+  };
+
   const savePermissions = async () => {
     const res = await fetch('/api/permissions', {
       method: 'PUT',
@@ -328,21 +411,34 @@ export const UserManagement = () => {
     setTimeout(() => setPermissionsToast(null), 3000);
   };
 
-  useEffect(() => { fetchUsers(); fetchPermissions(); }, [session?.access_token]);
+  useEffect(() => { fetchUsers(); fetchPermissions(); fetchUserTeams(); }, [session?.access_token]);
 
-  const handleUpdateUser = async (id: string, updates: Partial<UserProfile>) => {
+  const handleUpdateUser = async (id: string, updates: Partial<UserProfile>, team: 'marketing' | 'video' | '') => {
     const res = await fetch(`/api/users/${id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
       },
-      body: JSON.stringify(updates),
+      body: JSON.stringify({ ...updates, team }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || 'Failed to update user');
     }
+    
+    // Save team configuration in dashboard_data (for fallback/backward compatibility)
+    const nextTeams = { ...userTeams, [id]: team };
+    if (!team) delete nextTeams[id];
+    await fetch('/api/user-teams', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
+      body: JSON.stringify({ teams: nextTeams }),
+    });
+    setUserTeams(nextTeams);
     await fetchUsers();
   };
 
@@ -362,19 +458,34 @@ export const UserManagement = () => {
     setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: !u.is_active } : u));
   };
 
-  const handleInviteUser = async (email: string, name: string, role: Role, password: string): Promise<string | null> => {
+  const handleInviteUser = async (email: string, name: string, role: Role, password: string, team: 'marketing' | 'video' | ''): Promise<string | null> => {
     const res = await fetch('/api/users', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
       },
-      body: JSON.stringify({ email, name, role, password }),
+      body: JSON.stringify({ email, name, role, password, team }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       return data.error || 'Failed to create user';
     }
+    
+    if (data.user?.id) {
+      const nextTeams = { ...userTeams, [data.user.id]: team };
+      if (!team) delete nextTeams[data.user.id];
+      await fetch('/api/user-teams', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ teams: nextTeams }),
+      });
+      setUserTeams(nextTeams);
+    }
+    
     await fetchUsers();
     return null;
   };
@@ -474,16 +585,41 @@ export const UserManagement = () => {
               ))}
             </div>
             {r === 'junior' && (
-              <div className="mt-2 flex items-center gap-2">
-                <span className="text-xs text-white/60">حد الأولوية اليومي</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={20}
-                  value={rolePermissions.junior.dailyPriorityLimit}
-                  onChange={(e) => setRolePermissions(prev => ({ ...prev, junior: { ...prev.junior, dailyPriorityLimit: Math.max(0, Number(e.target.value || 0)) } }))}
-                  className="w-20 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-white text-xs"
-                />
+              <div className="mt-2 flex flex-wrap gap-4 border-t border-white/5 pt-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-white/60">حد الأولوية اليومي (تجميعات)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={rolePermissions.junior.dailyPriorityLimitTagme ?? rolePermissions.junior.dailyPriorityLimit ?? 1}
+                    onChange={(e) => setRolePermissions(prev => ({ 
+                      ...prev, 
+                      junior: { 
+                        ...prev.junior, 
+                        dailyPriorityLimitTagme: Math.max(0, Number(e.target.value || 0)) 
+                      } 
+                    }))}
+                    className="w-20 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-white text-xs"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-white/60">حد الأولوية اليومي (الريلز)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={rolePermissions.junior.dailyPriorityLimitReels ?? rolePermissions.junior.dailyPriorityLimit ?? 1}
+                    onChange={(e) => setRolePermissions(prev => ({ 
+                      ...prev, 
+                      junior: { 
+                        ...prev.junior, 
+                        dailyPriorityLimitReels: Math.max(0, Number(e.target.value || 0)) 
+                      } 
+                    }))}
+                    className="w-20 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-white text-xs"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -505,9 +641,10 @@ export const UserManagement = () => {
         ) : (
           <div className="divide-y divide-white/[0.04]">
             {/* Table Header */}
-            <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-3 text-[10px] font-black text-white/30 uppercase tracking-widest">
+            <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-4 px-6 py-3 text-[10px] font-black text-white/30 uppercase tracking-widest">
               <div />
               <div>المستخدم</div>
+              <div className="text-center">فريق العمل</div>
               <div className="text-center">الصلاحية</div>
               <div className="text-center">الحالة</div>
               <div className="text-center">تعديل</div>
@@ -516,9 +653,9 @@ export const UserManagement = () => {
               <motion.div
                 key={u.id}
                 layout
-                className={`grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-4 items-center hover:bg-white/[0.02] transition-all ${!u.is_active ? 'opacity-50' : ''}`}
+                className={`grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-4 px-6 py-4 items-center hover:bg-white/[0.02] transition-all ${!u.is_active ? 'opacity-50' : ''}`}
               >
-                <AvatarInitials name={u.name} role={u.role} />
+                <AvatarInitials name={u.name} role={u.role} team={userTeams[u.id]} />
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-bold text-white arabic-text">{u.name}</p>
@@ -526,41 +663,57 @@ export const UserManagement = () => {
                       <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 border border-purple-500/30">أنت</span>
                     )}
                   </div>
-                  <p className="text-xs text-white/40 mt-0.5">{u.email}</p>
                   {u.role === 'supervisor' && u.allowed_tabs.length > 0 && (
                     <p className="text-[10px] text-blue-400/60 mt-0.5 font-medium">
                       {u.allowed_tabs.slice(0, 3).join(' · ')}{u.allowed_tabs.length > 3 ? ` +${u.allowed_tabs.length - 3}` : ''}
                     </p>
                   )}
                 </div>
-                <div>
+                <div className="flex justify-center">
+                  {userTeams[u.id] === 'video' ? (
+                    <span className="text-xs font-black px-3 py-1.5 rounded-xl border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                      فيديو
+                    </span>
+                  ) : userTeams[u.id] === 'marketing' ? (
+                    <span className="text-xs font-black px-3 py-1.5 rounded-xl border bg-purple-500/10 text-purple-400 border-purple-500/20">
+                      ماركتينج
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium text-white/30">---</span>
+                  )}
+                </div>
+                <div className="flex justify-center">
                   <span className={`text-xs font-black px-3 py-1.5 rounded-xl border ${ROLE_COLORS[u.role]}`}>
                     {ROLE_LABELS[u.role]}
                   </span>
                 </div>
-                <button
-                  onClick={() => handleToggleActive(u)}
-                  disabled={u.id === profile?.id}
-                  className="flex items-center gap-1.5 text-xs font-bold cursor-pointer disabled:cursor-not-allowed transition-all"
-                  title={u.is_active ? 'إيقاف' : 'تفعيل'}
-                >
-                  {u.is_active ? (
-                    <span className="flex items-center gap-1.5 text-emerald-400 hover:text-rose-400 transition-colors">
-                      <ToggleRight size={22} />
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-white/20 hover:text-emerald-400 transition-colors">
-                      <ToggleLeft size={22} />
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => setEditingUser(u)}
-                  disabled={u.id === profile?.id && u.role === 'admin'}
-                  className="w-8 h-8 rounded-xl bg-white/5 hover:bg-purple-500/20 hover:text-purple-400 text-white/40 flex items-center justify-center transition-all cursor-pointer disabled:opacity-30"
-                >
-                  <Shield size={14} />
-                </button>
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => handleToggleActive(u)}
+                    disabled={u.id === profile?.id}
+                    className="flex items-center gap-1.5 text-xs font-bold cursor-pointer disabled:cursor-not-allowed transition-all"
+                    title={u.is_active ? 'إيقاف' : 'تفعيل'}
+                  >
+                    {u.is_active ? (
+                      <span className="flex items-center gap-1.5 text-emerald-400 hover:text-rose-400 transition-colors">
+                        <ToggleRight size={22} />
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-white/20 hover:text-emerald-400 transition-colors">
+                        <ToggleLeft size={22} />
+                      </span>
+                    )}
+                  </button>
+                </div>
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => setEditingUser(u)}
+                    disabled={u.id === profile?.id && u.role === 'admin'}
+                    className="w-8 h-8 rounded-xl bg-white/5 hover:bg-purple-500/20 hover:text-purple-400 text-white/40 flex items-center justify-center transition-all cursor-pointer disabled:opacity-30"
+                  >
+                    <Shield size={14} />
+                  </button>
+                </div>
               </motion.div>
             ))}
           </div>
@@ -572,6 +725,7 @@ export const UserManagement = () => {
         {editingUser && (
           <EditUserModal
             user={editingUser}
+            initialTeam={userTeams[editingUser.id] || ''}
             onClose={() => setEditingUser(null)}
             onSave={handleUpdateUser}
           />

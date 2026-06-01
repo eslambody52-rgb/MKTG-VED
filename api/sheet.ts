@@ -32,49 +32,111 @@ function formatPrivateKey(key: string | undefined): string {
   return formatted;
 }
 
+const parseCsv = (text: string): string[][] => {
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentCell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        currentCell += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      currentRow.push(currentCell.trim());
+      currentCell = '';
+    } else if (char === '\n' && !inQuotes) {
+      currentRow.push(currentCell.trim());
+      rows.push(currentRow);
+      currentRow = [];
+      currentCell = '';
+    } else if (char === '\r' && !inQuotes) {
+      // ignore
+    } else {
+      currentCell += char;
+    }
+  }
+  if (currentCell || currentRow.length > 0) {
+    currentRow.push(currentCell.trim());
+    rows.push(currentRow);
+  }
+  return rows;
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Allow CORS for local dev
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
   const { gid } = req.query;
+  if (!gid) {
+    return res.status(400).json({ error: 'Missing GID parameter' });
+  }
 
   try {
-    // Authenticate using Service Account credentials from environment variables
-    const auth = new google.auth.GoogleAuth({
-      credentials: {
-        client_email: process.env.GOOGLE_CLIENT_EMAIL?.replace(/"/g, '').trim(),
-        private_key: formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY),
-      },
-      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-    });
+    const strGid = String(gid);
+    const isServiceAccountSheet = (strGid === '1476192399' || strGid === '2086331904');
 
-    const sheets = google.sheets({ version: 'v4', auth });
-    const targetSpreadsheetId = getSpreadsheetId(gid);
+    let rows: any[][] = [];
+    let sheetName = '';
 
-    // Get all sheet names to find the one with matching GID
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: targetSpreadsheetId,
-    });
+    if (isServiceAccountSheet) {
+      // Authenticate using Service Account credentials from environment variables
+      const auth = new google.auth.GoogleAuth({
+        credentials: {
+          client_email: process.env.GOOGLE_CLIENT_EMAIL?.replace(/"/g, '').trim(),
+          private_key: formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY),
+        },
+        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+      });
 
-    // Find sheet name by GID
-    const sheetMeta = spreadsheet.data.sheets?.find(
-      (s) => String(s.properties?.sheetId) === String(gid)
-    );
+      const sheets = google.sheets({ version: 'v4', auth });
+      const targetSpreadsheetId = getSpreadsheetId(gid);
 
-    if (!sheetMeta?.properties?.title) {
-      return res.status(404).json({ error: `Sheet with GID ${gid} not found` });
+      // Get all sheet names to find the one with matching GID
+      const spreadsheet = await sheets.spreadsheets.get({
+        spreadsheetId: targetSpreadsheetId,
+      });
+
+      // Find sheet name by GID
+      const sheetMeta = spreadsheet.data.sheets?.find(
+        (s) => String(s.properties?.sheetId) === String(gid)
+      );
+
+      if (!sheetMeta?.properties?.title) {
+        return res.status(404).json({ error: `Sheet with GID ${gid} not found` });
+      }
+
+      sheetName = sheetMeta.properties.title;
+
+      // Fetch the data
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: targetSpreadsheetId,
+        range: sheetName,
+      });
+
+      rows = response.data.values || [];
+    } else {
+      // Stage sheets: fetch CSV directly from public URL
+      const reelsGids = ['1436746012', '1939073164', '0', '798246690', '371641707', '97351444', '1639251452'];
+      const activePublishedId = reelsGids.includes(strGid)
+        ? '2PACX-1vTvcQ3v1JOzacx9tcsYrbriofFyHlu7rOKKlsobvpP9vjnbHGcg_Qn9TLlbkgB2YsGiX0GO1U4wlZjd'
+        : '1GFMUIYZIfqFyrQ0nKxCcATP6T6HKj4_noqSqN2sVEsU';
+      const url = `https://docs.google.com/spreadsheets/d/e/${activePublishedId}/pub?gid=${gid}&output=csv&single=true&t=${Date.now()}`;
+      
+      const csvRes = await fetch(url);
+      if (!csvRes.ok) throw new Error(`CSV fetch failed: ${csvRes.status}`);
+      const text = await csvRes.text();
+      rows = parseCsv(text);
+      sheetName = `Public Sheet ${gid}`;
     }
-
-    const sheetName = sheetMeta.properties.title;
-
-    // Fetch the data
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: targetSpreadsheetId,
-      range: sheetName,
-    });
-
-    const rows = response.data.values || [];
     
     // Filter out rows that are entirely empty or just contain whitespace
     let validRows = rows.filter((row: any[]) => 
@@ -82,8 +144,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
     
     // Performance optimization for large sheets
-    if (String(gid) === '1476192399' || String(gid) === '2086331904') {
-      const isNewGid = String(gid) === '1476192399';
+    if (strGid === '1476192399' || strGid === '2086331904') {
+      const isNewGid = strGid === '1476192399';
       validRows = validRows
         .map((row: any[]) => {
           if (isNewGid) {

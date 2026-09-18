@@ -45,6 +45,7 @@ import DesignersDashboard from './components/DesignersDashboard';
 import { DesignAnalytics } from './components/DesignAnalytics';
 import { ReelsAnalytics } from './components/ReelsAnalytics';
 import { supabase, PERMISSIONS, ROLE_LABELS, ROLE_COLORS, DEFAULT_ROLE_PERMISSIONS, setRuntimeRolePermissions } from './lib/supabase';
+import { Analytics } from '@vercel/analytics/react';
 
 
 const generateKey = (item: any) => {
@@ -6396,7 +6397,12 @@ function RootApp() {
   );
 }
 
-export default function Root() {
-  return <RootApp />;
-}
 
+export default function Root() {
+  return (
+    <>
+      <RootApp />
+      <Analytics />
+    </>
+  );
+}
